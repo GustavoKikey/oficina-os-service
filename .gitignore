@@ -49,3 +49,6 @@ nb-configuration.xml
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# Cobertura gravada fora de target por engano
+jacoco-quarkus.exec

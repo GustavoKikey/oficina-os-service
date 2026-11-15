@@ -108,9 +108,11 @@ stateDiagram-v2
 cliente). Os demais estados esperam **a resposta de um serviço**, e são esses que têm
 timeout técnico (§6).
 
-Qualquer estado `*_SOLICITADO` vai para `FALHA` se o participante não responder depois
-dos reenvios. O diagrama mostra a transição só a partir de `EXECUCAO_SOLICITADA` para
-não poluir. Silêncio não é recusa: sem resposta, não dá para saber se o outro lado
+`EXECUCAO_SOLICITADA`, `ORCAMENTO_SOLICITADO`, `REPARO_SOLICITADO` e `COMPENSANDO` vão
+para `FALHA` se o participante não responder depois dos reenvios. O diagrama mostra a
+transição só a partir de `EXECUCAO_SOLICITADA` para não poluir. `PAGAMENTO_SOLICITADO`
+é diferente: ali quem está sendo esperado é o cliente pagando, e o prazo que vale é o
+de pagamento (§6). Se ele vencer, a saga compensa. Silêncio não é recusa: sem resposta, não dá para saber se o outro lado
 executou ou não. Compensar no escuro poderia, por exemplo, liberar peças de um reparo
 que já começou. Por isso a saga para e chama uma pessoa.
 
@@ -219,9 +221,9 @@ fora de ordem. A saga só é correta se cada parte se proteger disso. Detalhes n
 
 | Situação | Prazo (padrão) | Ao vencer |
 | --- | --- | --- |
-| Resposta de um comando (estados `*_SOLICITADO`) | 30 s | Reenvia o comando (backoff, até 3 vezes); depois, `FALHA` |
+| Resposta de um comando (`EXECUCAO_SOLICITADA`, `ORCAMENTO_SOLICITADO`, `REPARO_SOLICITADO`, `COMPENSANDO`) | 30 s | Reenvia o comando (backoff 60 s, 120 s, 240 s); depois de 3 reenvios, `FALHA` |
 | Cliente decidir o orçamento | 72 h | Trata como recusa e compensa |
-| Pagamento após a criação do link | 30 min (validade do link no Mercado Pago) | O Billing emite `PagamentoExpirado`; o orquestrador tem uma margem própria de 35 min |
+| Pagamento, contado da aprovação (`PAGAMENTO_SOLICITADO`) | 30 min (validade do link no Mercado Pago) | O Billing emite `PagamentoExpirado`; o orquestrador tem uma margem própria de 35 min e, vencida, compensa como pagamento expirado. Não há reenvio de `SolicitarPagamento`: o outbox garante a entrega ao broker, e a margem de 35 min cobre uma resposta perdida |
 | Reserva de peça | 48 h | A Execução expira a reserva; na liberação do reparo, tenta reservar de novo |
 
 Todos os prazos são configuráveis por variável de ambiente. Na demonstração, são
