@@ -5,9 +5,8 @@ Microsserviço de **ordens de serviço** da oficina mecânica (Tech Challenge FI
 histórico da OS, área do cliente (JWT por CPF) e **orquestra a saga** que coordena
 Execução e Billing.
 
-> **Situação: esqueleto (etapa 2 de 5).** Projeto, configuração, mensageria, CI,
-> manifestos e ambiente local estão prontos e testados. O domínio (migrado do monolito
-> da fase 3) e a saga entram na etapa 3.
+> **Situação: domínio e saga implementados (etapa 3 de 5).** Deploy no EKS e README final
+> com diagramas e evidências de cobertura entram na etapa 5.
 
 ---
 
@@ -62,6 +61,16 @@ docker compose up -d --build
 | http://localhost:8082/swagger | Billing Service |
 | http://localhost:15672 | Painel do RabbitMQ (`oficina` / `oficina`) |
 | http://localhost:16686 | Jaeger: traces distribuídos |
+
+**A saga de ponta a ponta:** [`scripts/fluxo-completo.py`](scripts/fluxo-completo.py) percorre,
+contra os três serviços no ar, o fluxo feliz (saga `CONCLUIDA`) e a compensação com estorno
+(reserva de peça vencida, outra OS consome a peça, o pagamento é estornado: saga `COMPENSADA`).
+Precisa de uma validade de reserva curta:
+
+```bash
+RESERVA_VALIDADE=PT20S docker compose up -d --build
+python scripts/fluxo-completo.py
+```
 
 ## Testes
 

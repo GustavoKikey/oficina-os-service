@@ -38,17 +38,25 @@ estoque da Execução precisa de lock pessimista. Resta o Billing.
 
 ### Modelo da tabela `oficina-billing-{ambiente}`
 
+Um orçamento por OS, e uma cobrança por orçamento: o agregado inteiro (itens, aprovação,
+pagamento com histórico) é **um documento num item**, chaveado pela OS.
+
 | Item | `PK` | `SK` | Atributos principais |
 | --- | --- | --- | --- |
-| Orçamento | `ORC#<orcamentoId>` | `ORCAMENTO` | `osId`, `cliente`, `itens[]`, `valorTotal`, `status`, `versao` |
-| Pagamento | `ORC#<orcamentoId>` | `PAG#<pagamentoId>` | `mpPreferenceId`, `mpPaymentId`, `status`, `valor`, `link`, `expiraEm`, `eventos[]` |
-| Outbox | `OUTBOX` | `<timestamp>#<messageId>` | `type`, `payload`, `headers` |
-| Mensagem processada | `MSG#<messageId>` | `MSG` | `ttl` (expira em 7 dias) |
+| Orçamento | `OS#<osId>` | `ORCAMENTO` | `orcamentoId`, `status`, `versao`, `dados` (o agregado em JSON, com o pagamento aninhado) |
+| Outbox | `OUTBOX` | `<epoch>#<messageId>` | `tipo`, `routingKey`, `envelope`, `headers` |
 
 | Índice | Chave | Uso |
 | --- | --- | --- |
-| `GSI1` | `GSI1PK = OS#<osId>` | Orçamento de uma OS (idempotência de `GerarOrcamento`) |
-| `GSI2` (esparso) | `GSI2PK = PAG#PENDENTE`, `GSI2SK = expiraEm` | Pagamentos a consultar no Mercado Pago, em ordem de vencimento |
+| `GSI1` | `GSI1PK = ORC#<orcamentoId>` | Achar o orçamento pelo `external_reference` do Mercado Pago (webhook) |
+| `GSI2` (esparso) | `GSI2PK = PAG#PENDENTE`, `GSI2SK = expiraEm` | Pagamentos a consultar, em ordem de vencimento — só os pendentes têm esses atributos |
+
+- **Chave pela OS** dá leitura consistente aos comandos da saga (que sempre trazem o
+  `osId`) e idempotência de graça: a criação usa `attribute_not_exists(PK)`.
+- **Concorrência otimista**: toda gravação exige `versao = <lida>` e grava `versao + 1`;
+  webhook, consulta periódica e comando não sobrescrevem um ao outro em silêncio.
+- **Deduplicação de comandos** é pela chave de negócio (ADR 010), não por um item de
+  inbox: comando repetido precisa ser respondido de novo, não descartado.
 
 Estado e outbox são gravados juntos com `TransactWriteItems`: é o outbox transacional
 do [ADR 010](adr-010-outbox-e-consumidor-idempotente.md), na versão DynamoDB.

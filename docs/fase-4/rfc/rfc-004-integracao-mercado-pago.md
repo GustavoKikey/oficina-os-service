@@ -1,6 +1,6 @@
 # RFC 004 — Integração com o Mercado Pago
 
-- **Status:** proposta (detalhes de API a confirmar na implementação, contra a documentação vigente do Mercado Pago)
+- **Status:** implementada no Billing Service; nomes de campos a confirmar no sandbox real (§7)
 - **Data:** 2026-11-15
 - **Serviço:** Billing
 
@@ -105,7 +105,20 @@ ocorrido no histórico do pagamento. Orçamento cancelado nunca fica com dinheir
 etapa de nuvem, se o tempo permitir. A saga não depende do webhook; ele só deixa a
 demonstração mais rápida.
 
-## 5. Configuração
+## 5. Provedor simulado
+
+O Billing tem dois adapters para a mesma porta (`ProvedorPagamentoGateway`):
+
+| `PAGAMENTO_PROVEDOR` | Uso |
+| --- | --- |
+| `simulado` (padrão) | Ambiente local, testes e ensaio — sem credenciais. O link de pagamento aponta para `/simulador/checkout/{orcamentoId}`; aprovar ou recusar é `POST /simulador/pagamentos/{orcamentoId}?resultado=aprovado\|recusado`. |
+| `mercadopago` | Sandbox (e produção) do Mercado Pago. |
+
+O simulador substitui só a conversa com o provedor. Consulta periódica, eventos,
+expiração, estorno e estorno automático são o mesmo código nos dois modos — o que os
+testes de integração exercitam vale para o Mercado Pago.
+
+## 6. Configuração
 
 | Variável | Origem |
 | --- | --- |
@@ -117,18 +130,22 @@ demonstração mais rápida.
 As credenciais são da conta de desenvolvedor do autor e **nunca** vão para o
 repositório.
 
-## 6. Testes
+## 7. Testes
 
 - **Unitários:** mapeamento de status do Mercado Pago para eventos, regras de
   expiração e estorno automático.
-- **Integração:** WireMock simulando a API do Mercado Pago (preferência criada,
-  aprovado, recusado, erro 5xx no estorno). O CI nunca chama o Mercado Pago de verdade.
+- **Adapter:** servidor HTTP local (do JDK) no papel da API do Mercado Pago — corpo da
+  preferência, autenticação, chave de idempotência do estorno, tradução de status e erros
+  5xx. O CI nunca chama o Mercado Pago de verdade.
+- **Integração:** fluxo completo com DynamoDB Local e o provedor simulado.
 - **Manual / vídeo:** sandbox real, com usuário comprador de teste e cartões de teste
   para aprovação e recusa.
 
-## 7. Em aberto
+## 8. Em aberto
 
-- Confirmar na documentação vigente os nomes exatos dos campos de expiração da
-  preferência e o formato do manifesto da assinatura do webhook.
+- Confirmar no sandbox real (credenciais de teste criadas pelo MCP Server do Mercado
+  Pago) os nomes dos campos de expiração da preferência e o manifesto da assinatura do
+  webhook — os links da documentação mudaram e não puderam ser conferidos durante a
+  implementação.
 - Avaliar se a API de Orders do Mercado Pago substitui a de preferências com vantagem
   para este caso.

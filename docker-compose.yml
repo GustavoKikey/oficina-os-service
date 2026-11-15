@@ -129,6 +129,12 @@ services:
       DB_USER: oficina
       DB_PASSWORD: oficina
       QUARKUS_MAILER_MOCK: "true"
+      INTERNAL_TOKEN: token-interno-local
+      # Prazos da saga (saga.md §6). Para a demonstração, encurte na hora de subir:
+      #   SAGA_PRAZO_APROVACAO=PT3M SAGA_PRAZO_PAGAMENTO=PT5M docker compose up -d
+      SAGA_PRAZO_RESPOSTA: ${SAGA_PRAZO_RESPOSTA:-PT30S}
+      SAGA_PRAZO_APROVACAO: ${SAGA_PRAZO_APROVACAO:-PT72H}
+      SAGA_PRAZO_PAGAMENTO: ${SAGA_PRAZO_PAGAMENTO:-PT35M}
 
   execucao-service:
     <<: *servico
@@ -145,6 +151,8 @@ services:
       DB_URL: jdbc:postgresql://postgres-execucao:5432/oficina_execucao
       DB_USER: oficina
       DB_PASSWORD: oficina
+      # Validade da reserva de peça. Para demonstrar o estorno: RESERVA_VALIDADE=PT1M
+      RESERVA_VALIDADE: ${RESERVA_VALIDADE:-PT48H}
 
   billing-service:
     <<: *servico
@@ -160,6 +168,13 @@ services:
       <<: *ambiente-comum
       AWS_REGION: us-east-1
       DYNAMODB_TABELA: oficina-billing-local
+      DYNAMODB_CRIAR_TABELA: "true"
+      # Sem credenciais do Mercado Pago, o checkout é simulado em /simulador (RFC 004 §5).
+      PAGAMENTO_PROVEDOR: ${PAGAMENTO_PROVEDOR:-simulado}
+      PAGAMENTO_VALIDADE: ${PAGAMENTO_VALIDADE:-PT30M}
+      SIMULADOR_URL_BASE: http://localhost:8082
+      MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
+      MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
       QUARKUS_DYNAMODB_ENDPOINT_OVERRIDE: http://dynamodb:8000
       QUARKUS_DYNAMODB_AWS_CREDENTIALS_TYPE: static
       QUARKUS_DYNAMODB_AWS_CREDENTIALS_STATIC_PROVIDER_ACCESS_KEY_ID: local
