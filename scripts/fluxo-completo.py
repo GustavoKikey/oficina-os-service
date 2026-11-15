@@ -170,7 +170,7 @@ def main():
     if opcoes.cenario in ("feliz", "todos"):
         cenario_feliz(of, servico, peca)
     if opcoes.cenario in ("estorno", "todos"):
-        cenario_estorno(of, servico, peca)
+        cenario_estorno(of, servico)
     print("Tudo certo. Traces distribuídos: http://localhost:16686 (serviço oficina-os-service)")
 
 
@@ -188,8 +188,12 @@ def cenario_feliz(of, servico, peca):
     print(f"   saga: {saga_a['estado']} — {len(saga_a['mensagens'])} mensagens trocadas\n")
 
 
-def cenario_estorno(of, servico, peca):
+def cenario_estorno(of, servico):
     print("== Cenário 2 — reserva vencida, peça consumida por outra OS, estorno", flush=True)
+    # Saldo para uma OS só: quem pagar primeiro leva; o outro pagamento é estornado.
+    peca = chamar("POST", f"{EXECUCAO}/pecas", of.token,
+                  {"descricao": "Amortecedor dianteiro", "valorUnitario": 95.00, "quantidadeInicial": 2})["id"]
+    print(f"   estoque: 2 amortecedores ({peca}), o suficiente para uma OS", flush=True)
     b = of.abrir("Bruno")
     of.diagnosticar(b, servico, peca, 2)
     print(f"   esperando a reserva de B vencer ({VALIDADE_RESERVA_S}s)...")
