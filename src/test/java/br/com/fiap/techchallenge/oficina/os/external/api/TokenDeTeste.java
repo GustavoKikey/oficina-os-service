@@ -3,6 +3,7 @@ package br.com.fiap.techchallenge.oficina.os.external.api;
 import io.smallrye.jwt.build.Jwt;
 
 import java.time.Duration;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -18,14 +19,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Serverless terá de honrar. Se o contrato mudar aqui sem mudar lá (ou o
  * contrário), os testes de isolamento quebram — que é o efeito desejado.
  */
-final class TokenDeTeste {
+public final class TokenDeTeste {
 
     private static final String ISSUER = "oficina-mvp";
 
     private TokenDeTeste() {}
 
     /** Token de cliente conforme ADR 001: {@code sub} = UUID e {@code groups} = CLIENTE. */
-    static String paraCliente(String clienteId) {
+    public static String paraCliente(String clienteId) {
         return Jwt.issuer(ISSUER)
                 .subject(clienteId)
                 .upn(clienteId)
@@ -36,11 +37,21 @@ final class TokenDeTeste {
     }
 
     /** Token administrativo, como o emitido por {@code POST /auth/login}. */
-    static String paraAdministrador() {
+    public static String paraAdministrador() {
         return Jwt.issuer(ISSUER)
                 .subject("admin")
                 .upn("admin")
                 .groups(Set.of("ADMINISTRADOR"))
+                .expiresIn(Duration.ofHours(1))
+                .sign();
+    }
+
+    /** Token de funcionário do balcão, como o emitido por {@code POST /auth/login}. */
+    public static String paraAtendente() {
+        return Jwt.issuer(ISSUER)
+                .subject("atendente")
+                .upn("atendente")
+                .groups(Set.of("ATENDENTE"))
                 .expiresIn(Duration.ofHours(1))
                 .sign();
     }
@@ -56,14 +67,30 @@ final class TokenDeTeste {
      * <p>A faixa começa em 9xx para não bater nos CPFs fixos dos ITs mais antigos,
      * que ocupam 1xx a 7xx (o primeiro valor gerado aqui já foi, uma vez,
      * exatamente o {@code 100.000.001-08} do {@code OrdemServicoResourceIT}).
+     *
+     * <p>Cada reinício do Quarkus nos testes (classes com recurso de teste próprio, como
+     * o BDD e o {@code SagaFluxoIT}) carrega esta classe num classloader novo, e a
+     * sequência voltaria ao começo, mas o banco é o mesmo. Por isso cada carga reserva
+     * um bloco de 100 mil CPFs numa propriedade da JVM, que não volta.
      */
-    static String cpfValido() {
-        int base = 900_000_000 + SEQUENCIA.getAndIncrement();
+    public static String cpfValido() {
+        int base = 900_000_000 + BLOCO * 100_000 + SEQUENCIA.getAndIncrement();
         String digitos = String.valueOf(base);
         return digitos + verificadores(digitos);
     }
 
+    private static final String PROPRIEDADE_BLOCO = "oficina.testes.bloco-de-cpf";
+    private static final int BLOCO = reservarBloco();
     private static final AtomicInteger SEQUENCIA = new AtomicInteger(1);
+
+    private static int reservarBloco() {
+        Properties propriedades = System.getProperties();
+        synchronized (propriedades) {
+            int bloco = Integer.parseInt(propriedades.getProperty(PROPRIEDADE_BLOCO, "0"));
+            propriedades.setProperty(PROPRIEDADE_BLOCO, String.valueOf(bloco + 1));
+            return bloco;
+        }
+    }
 
     private static String verificadores(String base9) {
         int d1 = digito(base9, 10);

@@ -5,8 +5,8 @@
 # paralelos, todos marcados como checagem obrigatória do PR:
 #
 #   1. qualidade ...... build, testes (unitários + integração com
-#                       Testcontainers), gate de cobertura ≥ 80% sobre o
-#                       serviço inteiro e quality gate do SonarCloud;
+#                       Testcontainers + BDD), gate de cobertura ≥ 80% sobre
+#                       o serviço inteiro e quality gate do SonarCloud;
 #   2. imagem ......... garante que o Dockerfile multi-stage builda;
 #   3. manifestos ..... valida k8s/ contra o schema do Kubernetes.
 #
@@ -93,6 +93,37 @@ jobs:
         with:
           name: relatorio-jacoco
           path: target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Evidência do BDD. Só o OS Service tem cenários (features/); nos outros o passo
+      # não encontra relatório e termina sem fazer nada.
+      - name: Cenários BDD no resumo do job
+        if: always()
+        run: |
+          shopt -s nullglob
+          relatorios=(target/cucumber/*.json)
+          [ ${#relatorios[@]} -gt 0 ] || exit 0
+          python3 - "${relatorios[@]}" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          print('## Cenários BDD (Cucumber)\n')
+          print('| Cenário | Passos | Resultado |\n| --- | --- | --- |')
+          for arquivo in sys.argv[1:]:
+              for funcionalidade in json.load(open(arquivo, encoding='utf-8')):
+                  for cenario in funcionalidade.get('elements', []):
+                      if cenario.get('type') != 'scenario':
+                          continue
+                      passos = [p['result']['status'] for p in cenario.get('steps', [])]
+                      ok = passos and all(s == 'passed' for s in passos)
+                      print(f"| {cenario['name']} | {len(passos)} | {'✅' if ok else '❌'} |")
+          PY
+
+      - name: Relatório BDD (artefato)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-bdd
+          path: target/cucumber/
           if-no-files-found: ignore
           retention-days: 14
 

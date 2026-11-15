@@ -197,7 +197,7 @@ O que a fase 4 acrescenta:
 | --- | --- |
 | Testes unitários em todos os serviços | JUnit 5 + Mockito no núcleo (entities/usecases), como na fase 3 |
 | Integração | Testcontainers: PostgreSQL, RabbitMQ e DynamoDB Local |
-| **BDD de um fluxo completo** | Cucumber no OS Service: OS paga e executada, pagamento recusado e falha ao liberar o reparo com estorno. Os outros serviços são simulados pelo conector em memória do SmallRye. |
+| **BDD de um fluxo completo** | Cucumber (extensão `quarkus-cucumber`) no OS Service, em Gherkin português: [`ciclo-de-vida-da-os.feature`](../../src/test/resources/features/ciclo-de-vida-da-os.feature). Um cenário percorre a OS do balcão à entrega, e um esquema de cenário cobre as cinco falhas da tabela de compensações (§4 da [saga](saga.md)), conferindo que só as compensações necessárias saem. A aplicação roda inteira; Execução e Billing entram pelo conector em memória do SmallRye. O relatório HTML vai para o resumo e os artefatos de cada execução do CI. |
 | **≥ 80% por serviço** | JaCoCo com gate sobre o **serviço inteiro** (não só o núcleo, como era na fase 3). DTOs, config e código gerado ficam de fora. |
 | Qualidade no CI | SonarCloud, com quality gate como check obrigatório do PR |
 

@@ -82,6 +82,20 @@ Roda os testes unitários e os que sobem a aplicação contra PostgreSQL e Rabbi
 (Testcontainers), e **falha o build se a cobertura do serviço ficar abaixo de 80%**.
 O relatório fica em `target/site/jacoco/index.html`.
 
+**BDD.** O ciclo de vida completo da OS está descrito em Gherkin, em português, em
+[`ciclo-de-vida-da-os.feature`](src/test/resources/features/ciclo-de-vida-da-os.feature):
+do balcão à entrega, e as cinco falhas que fazem a saga compensar (orçamento não gerado,
+recusa do cliente, pagamento recusado, link vencido e reparo não liberado com estorno).
+Os cenários rodam no `verify`, com a aplicação inteira no ar; Execução e Billing entram
+pelas mensagens que publicariam. Só eles:
+
+```bash
+./mvnw verify -Dit.test=CicloDeVidaDaOsBddIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+```
+
+Relatório: `target/cucumber/ciclo-de-vida-da-os.html`. No CI, os cenários aparecem no
+resumo de cada execução e o relatório fica nos artefatos (`relatorio-bdd`).
+
 ## Mensageria
 
 | Direção | Exchange / fila | Conteúdo |

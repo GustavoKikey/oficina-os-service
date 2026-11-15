@@ -19,6 +19,7 @@
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
         <jacoco-plugin.version>0.8.16</jacoco-plugin.version>
+        <quarkus-cucumber.version>1.5.0</quarkus-cucumber.version>
         <sonar-plugin.version>5.8.0.7211</sonar-plugin.version>
 
         <!-- Testes de integração (*IT) rodam no verify: o CI e a máquina local têm Docker. -->
@@ -164,6 +165,13 @@
         <dependency>
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- BDD: cenários em Gherkin (src/test/resources/features) rodando dentro do @QuarkusTest. -->
+        <dependency>
+            <groupId>io.quarkiverse.cucumber</groupId>
+            <artifactId>quarkus-cucumber</artifactId>
+            <version>${quarkus-cucumber.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
