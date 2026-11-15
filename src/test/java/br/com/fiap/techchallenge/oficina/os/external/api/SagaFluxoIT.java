@@ -1,10 +1,14 @@
 package br.com.fiap.techchallenge.oficina.os.external.api;
 
+import br.com.fiap.techchallenge.oficina.os.external.persistence.mensageria.OutboxJpaEntity;
 import br.com.fiap.techchallenge.oficina.os.suporte.MensageriaEmMemoria;
+import io.opentelemetry.api.trace.Span;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import io.restassured.specification.RequestSpecification;
+import io.smallrye.reactive.messaging.TracingMetadata;
 import io.smallrye.reactive.messaging.memory.InMemoryConnector;
 import io.smallrye.reactive.messaging.memory.InMemorySink;
 import io.smallrye.reactive.messaging.memory.InMemorySource;
@@ -12,6 +16,7 @@ import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import jakarta.enterprise.inject.Any;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,6 +51,9 @@ class SagaFluxoIT {
     @Inject
     @Any
     InMemoryConnector conector;
+
+    @Inject
+    EntityManager em;
 
     private InMemorySink<String> comandos;
     private InMemorySource<String> eventos;
@@ -204,6 +212,29 @@ class SagaFluxoIT {
         comoAdmin().get("/ordens-servico?status=RECEBIDA").then().statusCode(200).body("id", hasItems(os.id));
         comoAdmin().get("/ordens-servico/" + os.id + "/status").then().body("descricao", equalTo("Recebida"));
         given().get("/admin/sagas/" + os.id).then().statusCode(401);
+    }
+
+    @Test
+    @DisplayName("relay publica no trace da transação que gravou o outbox (contexto corrente, não 'previous')")
+    void relayContinuaOTraceOriginal() {
+        String traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+        var linha = new OutboxJpaEntity();
+        linha.messageId = UUID.randomUUID();
+        linha.tipo = "AbrirOrdemExecucao";
+        linha.routingKey = "execucao";
+        linha.correlationId = UUID.randomUUID();
+        linha.envelope = new JsonObject().put("messageId", linha.messageId.toString()).encode();
+        linha.headers = new JsonObject().put("traceparent", "00-" + traceId + "-00f067aa0ba902b7-01").encode();
+        linha.criadoEm = OffsetDateTime.now(ZoneOffset.UTC);
+        QuarkusTransaction.requiringNew().run(() -> em.persist(linha));
+
+        Message<String> publicada = await().atMost(ESPERA).until(
+                () -> comandos.received().stream().filter(m -> m.getPayload().equals(linha.envelope)).findFirst(),
+                java.util.Optional::isPresent).orElseThrow();
+
+        var contexto = TracingMetadata.fromMessage(publicada).orElseThrow().getCurrentContext();
+        assertNotNull(contexto, "o conector RabbitMQ só usa o contexto corrente para criar o span de publicação");
+        assertEquals(traceId, Span.fromContext(contexto).getSpanContext().getTraceId());
     }
 
     // =====================================================================
