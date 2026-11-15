@@ -1,0 +1,8 @@
+# Namespace compartilhado pelos três serviços. Cada repositório o aplica
+# (idempotente), para que qualquer um possa ser implantado primeiro.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oficina
+  labels:
+    app.kubernetes.io/part-of: oficina

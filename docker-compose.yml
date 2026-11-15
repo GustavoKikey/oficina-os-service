@@ -1,0 +1,171 @@
+# =====================================================================
+# Ambiente local completo — os três serviços + toda a infraestrutura
+# ---------------------------------------------------------------------
+# Pré-requisito: os três repositórios clonados lado a lado:
+#
+#   pasta/
+#   ├── oficina-os-service/        ← este arquivo
+#   ├── oficina-execucao-service/
+#   └── oficina-billing-service/
+#
+#   docker compose up -d --build        sobe tudo
+#   docker compose up -d rabbitmq dynamodb jaeger
+#                                       só a infra (para 'mvn quarkus:dev')
+#
+# Endereços no host:
+#   OS Service        http://localhost:8080/swagger
+#   Execução Service  http://localhost:8081/swagger
+#   Billing Service   http://localhost:8082/swagger
+#   RabbitMQ (painel) http://localhost:15672   oficina / oficina
+#   Jaeger (traces)   http://localhost:16686
+#
+# Os serviços rodam no perfil %prod, exatamente como no Kubernetes: toda
+# configuração entra por variável de ambiente.
+# =====================================================================
+name: oficina
+
+x-servico: &servico
+  restart: unless-stopped
+  depends_on: &dependencias
+    rabbitmq:
+      condition: service_healthy
+    jaeger:
+      condition: service_started
+
+x-ambiente-comum: &ambiente-comum
+  AMBIENTE: local
+  JAVA_OPTS: "-XX:MaxRAMPercentage=50.0"
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: oficina
+  RABBITMQ_PASSWORD: oficina
+  # Traces para o Jaeger local (o New Relic fica para a nuvem).
+  OTEL_SDK_DISABLED: "false"
+  OTLP_ENDPOINT: http://jaeger:4318
+
+services:
+  # ------------------------------------------------------------------
+  # Infraestrutura
+  # ------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:4.3-management-alpine
+    environment:
+      # 'guest' só conecta via localhost — por isso um usuário próprio.
+      RABBITMQ_DEFAULT_USER: oficina
+      RABBITMQ_DEFAULT_PASS: oficina
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  postgres-os:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: oficina_os
+      POSTGRES_USER: oficina
+      POSTGRES_PASSWORD: oficina
+    # 5433 no host: a 5432 costuma estar ocupada por um PostgreSQL instalado.
+    ports:
+      - "5433:5432"
+    volumes:
+      - dados-os:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oficina -d oficina_os"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres-execucao:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: oficina_execucao
+      POSTGRES_USER: oficina
+      POSTGRES_PASSWORD: oficina
+    ports:
+      - "5434:5432"
+    volumes:
+      - dados-execucao:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oficina -d oficina_execucao"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dynamodb:
+    image: amazon/dynamodb-local:3.3.2
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
+    user: root
+    ports:
+      - "8000:8000"
+    volumes:
+      - dados-billing:/home/dynamodblocal/data
+
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    ports:
+      - "16686:16686"   # interface web
+      - "4318:4318"     # OTLP http/protobuf
+
+  # ------------------------------------------------------------------
+  # Serviços
+  # ------------------------------------------------------------------
+  os-service:
+    <<: *servico
+    build: .
+    image: oficina-os-service:local
+    ports:
+      - "8080:8080"
+    depends_on:
+      <<: *dependencias
+      postgres-os:
+        condition: service_healthy
+    environment:
+      <<: *ambiente-comum
+      DB_URL: jdbc:postgresql://postgres-os:5432/oficina_os
+      DB_USER: oficina
+      DB_PASSWORD: oficina
+      QUARKUS_MAILER_MOCK: "true"
+
+  execucao-service:
+    <<: *servico
+    build: ../oficina-execucao-service
+    image: oficina-execucao-service:local
+    ports:
+      - "8081:8080"
+    depends_on:
+      <<: *dependencias
+      postgres-execucao:
+        condition: service_healthy
+    environment:
+      <<: *ambiente-comum
+      DB_URL: jdbc:postgresql://postgres-execucao:5432/oficina_execucao
+      DB_USER: oficina
+      DB_PASSWORD: oficina
+
+  billing-service:
+    <<: *servico
+    build: ../oficina-billing-service
+    image: oficina-billing-service:local
+    ports:
+      - "8082:8080"
+    depends_on:
+      <<: *dependencias
+      dynamodb:
+        condition: service_started
+    environment:
+      <<: *ambiente-comum
+      AWS_REGION: us-east-1
+      DYNAMODB_TABELA: oficina-billing-local
+      QUARKUS_DYNAMODB_ENDPOINT_OVERRIDE: http://dynamodb:8000
+      QUARKUS_DYNAMODB_AWS_CREDENTIALS_TYPE: static
+      QUARKUS_DYNAMODB_AWS_CREDENTIALS_STATIC_PROVIDER_ACCESS_KEY_ID: local
+      QUARKUS_DYNAMODB_AWS_CREDENTIALS_STATIC_PROVIDER_SECRET_ACCESS_KEY: local
+
+volumes:
+  dados-os:
+  dados-execucao:
+  dados-billing:

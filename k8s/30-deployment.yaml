@@ -1,0 +1,140 @@
+# =====================================================================
+# Deployment — OS Service (clientes, veículos, OS e orquestração da saga)
+# ---------------------------------------------------------------------
+# Mesmo padrão da fase 3: réplicas controladas pelo HPA, rolling update
+# sem downtime, usuário não-root, filesystem somente leitura e probes do
+# SmallRye Health. A readiness inclui banco e RabbitMQ: pod sem broker
+# sai do Service em vez de aceitar requisição que não conseguiria concluir.
+# =====================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oficina-os
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-os
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: oficina
+spec:
+  # 'replicas' fica de fora de propósito: quem decide a escala é o HPA.
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oficina-os
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        # Scrape das métricas de negócio pelo agente New Relic (ver fase 3).
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/q/metrics"
+        prometheus.io/port: "8080"
+        newrelic.io/scrape: "true"
+        newrelic.io/path: "/q/metrics"
+        newrelic.io/port: "8080"
+      labels:
+        app.kubernetes.io/name: oficina-os
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: oficina
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          # Substituída no deploy por 'kubectl set image' (tag do ECR).
+          image: oficina-os-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: oficina-os-config
+          env:
+            # Credenciais do banco próprio: Secret criado pelo CD a partir do
+            # Secrets Manager. Nenhum outro serviço recebe este Secret.
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-os-db
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-os-db
+                  key: password
+            # Usuário próprio no RabbitMQ, com permissão só nas filas e
+            # exchanges deste serviço (ADR 008).
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-os-rabbitmq
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-os-rabbitmq
+                  key: password
+            # optional: sem a chave o pod sobe normalmente, só sem exportar traces.
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-newrelic
+                  key: license-key
+                  optional: true
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /etc/oficina/jwt
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          # Três JVMs dividem nós t3.medium com RabbitMQ e o agente New Relic:
+          # requests enxutos; memória request = limit (a JVM não devolve memória
+          # ao SO; heap limitado a 50% pelo JAVA_OPTS).
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /q/health/started
+              port: http
+            periodSeconds: 2
+            failureThreshold: 45
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        # Par de chaves JWT de produção: Secret criado pelo CD (não versionado).
+        - name: jwt-keys
+          secret:
+            secretName: oficina-jwt-keys
+        - name: tmp
+          emptyDir: {}

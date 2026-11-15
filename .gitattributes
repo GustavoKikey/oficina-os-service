@@ -1,0 +1,7 @@
+# Quebras de linha normalizadas no repositório; scripts de shell sempre com LF
+# (o mvnw quebra no Linux/CI se chegar com CRLF).
+* text=auto
+mvnw text eol=lf
+*.sh text eol=lf
+*.cmd text eol=crlf
+*.pem text eol=lf

@@ -1,0 +1,115 @@
+# =====================================================================
+# CI — Integração Contínua (idêntico nos três serviços)
+# ---------------------------------------------------------------------
+# Roda em todo push fora da main e em todo PR para a main. Três jobs
+# paralelos, todos marcados como checagem obrigatória do PR:
+#
+#   1. qualidade ...... build, testes (unitários + integração com
+#                       Testcontainers), gate de cobertura ≥ 80% sobre o
+#                       serviço inteiro e quality gate do SonarCloud;
+#   2. imagem ......... garante que o Dockerfile multi-stage builda;
+#   3. manifestos ..... valida k8s/ contra o schema do Kubernetes.
+#
+# O deploy contínuo (homolog → hom, main → prod) fica em cd.yml.
+# =====================================================================
+name: CI
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualidade:
+    name: Build, testes, cobertura e SonarCloud
+    runs-on: ubuntu-latest
+    env:
+      # 'secrets' não é permitido em 'if:' de step; exposto aqui e testado como env.
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - name: Checkout (histórico completo — o Sonar usa para "código novo")
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: JDK 21 (Temurin) + cache do Maven
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Em checkout feito no Windows o bit de execução do wrapper pode se perder.
+      - name: Maven Wrapper executável
+        run: chmod +x mvnw
+
+      - name: Build, testes e gate de cobertura (≥ 80%)
+        run: ./mvnw -B -ntp verify
+
+      - name: SonarCloud (falha o job se o quality gate reprovar)
+        if: env.SONAR_TOKEN != ''
+        run: >
+          ./mvnw -B -ntp org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+          -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+          -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
+          -Dsonar.qualitygate.wait=true
+
+      - name: SonarCloud não configurado
+        if: env.SONAR_TOKEN == ''
+        run: echo "::warning::SONAR_TOKEN ausente — análise do SonarCloud pulada."
+
+      # Evidência de cobertura exigida na entrega: aparece no resumo de cada execução.
+      - name: Cobertura no resumo do job
+        if: always()
+        run: |
+          csv=target/site/jacoco/jacoco.csv
+          [ -f "$csv" ] || { echo "Sem relatório de cobertura." >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          python3 - "$csv" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import csv, sys
+          linhas = list(csv.DictReader(open(sys.argv[1])))
+          def pct(c):
+              cob = sum(int(l[f'{c}_COVERED']) for l in linhas)
+              per = sum(int(l[f'{c}_MISSED']) for l in linhas)
+              return 100.0 * cob / (cob + per) if cob + per else 100.0
+          print('## Cobertura de testes (JaCoCo)\n')
+          print('| Métrica | Cobertura |\n| --- | --- |')
+          for c, nome in [('INSTRUCTION', 'Instruções (gate ≥ 80%)'), ('BRANCH', 'Branches'), ('LINE', 'Linhas')]:
+              print(f'| {nome} | {pct(c):.1f}% |')
+          PY
+
+      - name: Relatório de cobertura (artefato)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-jacoco
+          path: target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  imagem:
+    name: Build da imagem Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build (valida o Dockerfile multi-stage)
+        run: docker build -t "${{ github.event.repository.name }}:ci" .
+
+  manifestos:
+    name: Validação dos manifestos Kubernetes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kubeconform (k8s/ contra o schema oficial)
+        run: |
+          docker run --rm -v "$PWD/k8s:/k8s:ro" ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -summary /k8s

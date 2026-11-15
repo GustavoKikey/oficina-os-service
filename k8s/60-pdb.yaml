@@ -1,0 +1,15 @@
+# Garante ao menos um pod no ar durante drenagem de nó e atualização do cluster.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oficina-os
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-os
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: oficina
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oficina-os
