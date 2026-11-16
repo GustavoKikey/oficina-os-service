@@ -5,7 +5,9 @@ output "db_endpoint" {
 
 output "jdbc_url" {
   description = "URL JDBC do banco do OS Service."
-  value       = aws_ssm_parameter.db_jdbc_url.value
+  # Montada a partir do RDS, não lida do parâmetro do SSM: o valor de um
+  # aws_ssm_parameter é marcado como sensível, e o plan recusa expô-lo num output.
+  value = "jdbc:postgresql://${aws_db_instance.este.address}:${aws_db_instance.este.port}/${var.nome_banco}"
 }
 
 output "db_secret_arn" {
