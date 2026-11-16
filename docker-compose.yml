@@ -175,6 +175,9 @@ services:
       SIMULADOR_URL_BASE: http://localhost:8082
       MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
       MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
+      # true: sandbox_init_point (credencial TEST-); false: init_point (credencial de
+      # produção de uma conta de teste vendedora, o modelo atual do Mercado Pago).
+      MP_LINK_SANDBOX: ${MP_LINK_SANDBOX:-true}
       QUARKUS_DYNAMODB_ENDPOINT_OVERRIDE: http://dynamodb:8000
       QUARKUS_DYNAMODB_AWS_CREDENTIALS_TYPE: static
       QUARKUS_DYNAMODB_AWS_CREDENTIALS_STATIC_PROVIDER_ACCESS_KEY_ID: local

@@ -15,8 +15,15 @@ Pré-requisito (na pasta oficina-os-service), com validade de reserva curta:
     RESERVA_VALIDADE=PT20S docker compose up -d --build
 
 Uso:
-    python scripts/fluxo-completo.py
+    python scripts/fluxo-completo.py                 # os dois cenários, checkout simulado
+    python scripts/fluxo-completo.py --mercadopago   # pagamentos de verdade no Mercado Pago (teste)
+    python scripts/fluxo-completo.py --cenario feliz # só um dos cenários (feliz | estorno)
+
+Com --mercadopago, o Billing precisa estar com PAGAMENTO_PROVEDOR=mercadopago (arquivo .env).
+O roteiro mostra o link de cada cobrança e espera: abra numa janela anônima, entre com o
+comprador de teste e pague com um cartão de teste com titular APRO.
 """
+import argparse
 import json
 import random
 import string
@@ -29,6 +36,7 @@ OS = "http://localhost:8080"
 EXECUCAO = "http://localhost:8081"
 BILLING = "http://localhost:8082"
 VALIDADE_RESERVA_S = 20
+ESPERA_PAGAMENTO_S = 15 * 60
 
 for fluxo in (sys.stdout, sys.stderr):
     try:
@@ -63,7 +71,7 @@ def esperar(descricao, condicao, limite=90):
         try:
             valor = condicao()
             if valor:
-                print(f"   ✓ {descricao} ({time.time() - inicio:.0f}s)")
+                print(f"   ✓ {descricao} ({time.time() - inicio:.0f}s)", flush=True)
                 return valor
         except RuntimeError:
             pass
@@ -86,7 +94,8 @@ def placa():
 
 
 class Oficina:
-    def __init__(self):
+    def __init__(self, mercadopago=False):
+        self.mercadopago = mercadopago
         self.token = chamar("POST", f"{OS}/auth/login", corpo={"username": "admin", "password": "admin123"})["accessToken"]
 
     def os(self, os_id):
@@ -122,7 +131,13 @@ class Oficina:
         chamar("POST", f"{OS}/ordens-servico/{os_id}/orcamento/aprovar", self.token)
         link = esperar("link de pagamento disponível",
                        lambda: chamar("GET", f"{OS}/ordens-servico/{os_id}/status", self.token)["linkPagamento"])
-        print(f"   link: {link}")
+        print(f"   link: {link}", flush=True)
+        if self.mercadopago:
+            print("   ➜ PAGUE AGORA, numa janela anônima, logado com o comprador de teste;")
+            print("     cartão de teste com titular APRO (CPF 12345678909)", flush=True)
+            esperar("Mercado Pago aprovou e o Billing confirmou o pagamento",
+                    lambda: self.saga(os_id)["estado"] != "PAGAMENTO_SOLICITADO", limite=ESPERA_PAGAMENTO_S)
+            return
         orcamento = self.os(os_id)["orcamento"]["orcamentoId"]
         chamar("POST", f"{BILLING}/simulador/pagamentos/{orcamento}?resultado=aprovado")
         print("   cliente pagou no checkout (simulado)")
@@ -141,13 +156,26 @@ class Oficina:
 
 
 def main():
-    of = Oficina()
+    args = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    args.add_argument("--mercadopago", action="store_true", help="pagamentos reais no Mercado Pago (teste)")
+    args.add_argument("--cenario", choices=["feliz", "estorno", "todos"], default="todos")
+    opcoes = args.parse_args()
+
+    of = Oficina(mercadopago=opcoes.mercadopago)
     peca = chamar("POST", f"{EXECUCAO}/pecas", of.token,
                   {"descricao": "Pastilha de freio", "valorUnitario": 95.00, "quantidadeInicial": 4})["id"]
     servico = chamar("POST", f"{EXECUCAO}/servicos", of.token, {"descricao": "Alinhamento", "valorBase": 120.00})["id"]
     print(f"Estoque: 4 pastilhas ({peca})\n")
 
-    print("== Cenário 1 — fluxo feliz")
+    if opcoes.cenario in ("feliz", "todos"):
+        cenario_feliz(of, servico, peca)
+    if opcoes.cenario in ("estorno", "todos"):
+        cenario_estorno(of, servico)
+    print("Tudo certo. Traces distribuídos: http://localhost:16686 (serviço oficina-os-service)")
+
+
+def cenario_feliz(of, servico, peca):
+    print("== Cenário 1 — fluxo feliz", flush=True)
     a = of.abrir("Alice")
     of.diagnosticar(a, servico, peca, 2)
     of.aprovar_e_pagar(a)
@@ -159,7 +187,13 @@ def main():
     print(f"   histórico: {' → '.join(historico)}")
     print(f"   saga: {saga_a['estado']} — {len(saga_a['mensagens'])} mensagens trocadas\n")
 
-    print("== Cenário 2 — reserva vencida, peça consumida por outra OS, estorno")
+
+def cenario_estorno(of, servico):
+    print("== Cenário 2 — reserva vencida, peça consumida por outra OS, estorno", flush=True)
+    # Saldo para uma OS só: quem pagar primeiro leva; o outro pagamento é estornado.
+    peca = chamar("POST", f"{EXECUCAO}/pecas", of.token,
+                  {"descricao": "Amortecedor dianteiro", "valorUnitario": 95.00, "quantidadeInicial": 2})["id"]
+    print(f"   estoque: 2 amortecedores ({peca}), o suficiente para uma OS", flush=True)
     b = of.abrir("Bruno")
     of.diagnosticar(b, servico, peca, 2)
     print(f"   esperando a reserva de B vencer ({VALIDADE_RESERVA_S}s)...")
@@ -178,8 +212,6 @@ def main():
           f"(R$ {orc_b['valorTotal']} devolvidos)")
     enviadas = [m["tipo"] for m in of.saga(b)["mensagens"] if m["direcao"] == "ENVIADA"]
     print(f"   comandos da saga de B: {' → '.join(enviadas)}\n")
-
-    print("Tudo certo. Traces distribuídos: http://localhost:16686 (serviço oficina-os-service)")
 
 
 if __name__ == "__main__":

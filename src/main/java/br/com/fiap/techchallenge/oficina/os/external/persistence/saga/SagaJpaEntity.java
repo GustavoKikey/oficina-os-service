@@ -33,7 +33,8 @@ public class SagaJpaEntity {
     @Column(name = "comandos_pendentes", nullable = false)
     public String comandosPendentes;
 
-    @Column(name = "motivo_falha", length = 300)
+    /** TEXT (V2): pode trazer o erro de outro serviço, de tamanho imprevisível. */
+    @Column(name = "motivo_falha")
     public String motivoFalha;
 
     @Column(name = "iniciada_em", nullable = false)

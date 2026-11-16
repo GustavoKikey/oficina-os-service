@@ -82,6 +82,20 @@ Roda os testes unitários e os que sobem a aplicação contra PostgreSQL e Rabbi
 (Testcontainers), e **falha o build se a cobertura do serviço ficar abaixo de 80%**.
 O relatório fica em `target/site/jacoco/index.html`.
 
+**BDD.** O ciclo de vida completo da OS está descrito em Gherkin, em português, em
+[`ciclo-de-vida-da-os.feature`](src/test/resources/features/ciclo-de-vida-da-os.feature):
+do balcão à entrega, e as cinco falhas que fazem a saga compensar (orçamento não gerado,
+recusa do cliente, pagamento recusado, link vencido e reparo não liberado com estorno).
+Os cenários rodam no `verify`, com a aplicação inteira no ar; Execução e Billing entram
+pelas mensagens que publicariam. Só eles:
+
+```bash
+./mvnw verify -Dit.test=CicloDeVidaDaOsBddIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+```
+
+Relatório: `target/cucumber/ciclo-de-vida-da-os.html`. No CI, os cenários aparecem no
+resumo de cada execução e o relatório fica nos artefatos (`relatorio-bdd`).
+
 ## Mensageria
 
 | Direção | Exchange / fila | Conteúdo |
@@ -94,7 +108,7 @@ O relatório fica em `target/site/jacoco/index.html`.
 
 | Gatilho | O que roda |
 | --- | --- |
-| Push fora da `main` e PR para a `main` | [`ci.yml`](.github/workflows/ci.yml): build, testes, gate de cobertura, SonarCloud, imagem Docker, kubeconform |
+| PR para a `main` e push na `main` (depois do merge) | [`ci.yml`](.github/workflows/ci.yml): build, testes, gate de cobertura, SonarCloud (o plano gratuito analisa só PRs e a `main`), imagem Docker, kubeconform. Numa branch sem PR: *Run workflow* |
 | `homolog` → `hom`, `main` → `prod` | Deploy no EKS (etapa 5) |
 
 `main` protegida: merge só por Pull Request, com as checagens do CI obrigatórias.

@@ -153,6 +153,30 @@ class SagaFluxoIT {
     }
 
     @Test
+    @DisplayName("estorno que falha leva a saga a FALHA, mesmo com o erro inteiro do Mercado Pago")
+    void estornoQueFalhaVaiParaFalha() {
+        Os os = abrirOs();
+        levarAteAguardandoAprovacao(os);
+        comoAdmin().post("/ordens-servico/" + os.id + "/orcamento/aprovar").then().statusCode(200);
+        esperarComando(os.id, "SolicitarPagamento");
+        publicar(os.id, "PagamentoConfirmado", new JsonObject());
+        esperarComando(os.id, "LiberarParaReparo");
+        publicar(os.id, "ReparoNaoLiberado", new JsonObject().put("motivo", "ESTOQUE_INSUFICIENTE"));
+        esperarComando(os.id, "EstornarPagamento");
+
+        // Erro real do Mercado Pago (corpo JSON com causa), bem acima dos 300 caracteres de antes.
+        String erro = "Mercado Pago respondeu 401 ao estornar: {\"message\":\"Unauthorized use of live credentials\","
+                + "\"error\":\"unauthorized\",\"status\":401,\"cause\":[{\"code\":7,\"description\":"
+                + "\"Unauthorized use of live credentials\",\"data\":\"" + "x".repeat(400) + "\"}]}";
+        publicar(os.id, "EstornoFalhou", new JsonObject().put("erro", erro));
+
+        await().atMost(ESPERA).untilAsserted(() -> comoAdmin().get("/admin/sagas/" + os.id).then()
+                .body("estado", equalTo("FALHA"))
+                .body("estadoAntesDaFalha", equalTo("COMPENSANDO"))
+                .body("motivoFalha", equalTo("Estorno falhou no Mercado Pago: " + erro)));
+    }
+
+    @Test
     @DisplayName("o cliente curioso: Bruno não vê nem decide a OS da Alice")
     void clienteSoAlcancaAsProprias() {
         Os daAlice = abrirOs();

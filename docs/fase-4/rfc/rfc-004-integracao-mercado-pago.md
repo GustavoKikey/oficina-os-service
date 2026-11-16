@@ -1,6 +1,6 @@
 # RFC 004 — Integração com o Mercado Pago
 
-- **Status:** implementada no Billing Service; nomes de campos a confirmar no sandbox real (§7)
+- **Status:** implementada no Billing Service e validada com pagamento real em conta de teste (§7); falta o webhook com URL pública (§8)
 - **Data:** 2026-11-15
 - **Serviço:** Billing
 
@@ -122,7 +122,8 @@ testes de integração exercitam vale para o Mercado Pago.
 
 | Variável | Origem |
 | --- | --- |
-| `MP_ACCESS_TOKEN` | Credencial de teste da aplicação no Mercado Pago (Secret) |
+| `MP_ACCESS_TOKEN` | Access Token da conta de teste **vendedora** (Secret) |
+| `MP_LINK_SANDBOX` | `false` com credencial de produção de conta de teste (modelo atual: link `init_point`); `true` só com credencial `TEST-` (`sandbox_init_point`) |
 | `MP_WEBHOOK_SECRET` | Chave de assinatura dos webhooks (Secret) |
 | `MP_BASE_URL` | `https://api.mercadopago.com` |
 | `MP_PRAZO_PAGAMENTO` | `PT30M` (reduzido na demonstração) |
@@ -138,14 +139,41 @@ repositório.
   preferência, autenticação, chave de idempotência do estorno, tradução de status e erros
   5xx. O CI nunca chama o Mercado Pago de verdade.
 - **Integração:** fluxo completo com DynamoDB Local e o provedor simulado.
-- **Manual / vídeo:** sandbox real, com usuário comprador de teste e cartões de teste
-  para aprovação e recusa.
+- **Manual / vídeo:** Mercado Pago real com contas de teste. `scripts/fluxo-completo.py
+  --mercadopago` leva a OS até o link e espera o pagamento; o comprador de teste paga numa
+  janela anônima com cartão de teste (titular `APRO` aprova, `OTHE` recusa).
+
+### Validação em 2026-11-15
+
+Com a aplicação criada no painel do Mercado Pago, o Mercado Pago cria sozinho uma **conta de
+teste vendedora**; as credenciais de produção dela (`APP_USR-…`) são as que o Billing usa, e o
+link certo é o `init_point`. Um pagamento de R$ 310,00 foi feito pela conta de teste
+compradora, e o fluxo inteiro rodou sem nenhum ajuste no código:
+
+- a preferência foi aceita com `expires`, `expiration_date_to` (30 min), `external_reference`
+  (= `orcamentoId`), itens e `statement_descriptor` — conferido lendo a preferência de volta
+  na API;
+- a consulta periódica (`/v1/payments/search?external_reference=…`) achou o pagamento
+  `approved`/`accredited` em até 15 s, e a saga seguiu até `CONCLUIDA`.
+
+No cenário de estorno (dois pagamentos reais, o segundo sem peça para o reparo), cobrança,
+confirmação e recusa do reparo funcionaram, mas o estorno voltou `401 Unauthorized use of
+live credentials`: a conta de teste vendedora não tem as credenciais de produção
+**ativadas** (formulário e termos no painel do Mercado Pago), e o endpoint de estorno exige
+isso. O teste expôs um bug, já corrigido: o erro do Mercado Pago não cabia em
+`sagas.motivo_falha` e a saga não chegava a `FALHA`. Agora ela chega, com o motivo
+*"Estorno falhou no Mercado Pago: … Unauthorized use of live credentials"*, e o alerta de
+dinheiro preso dispara — o comportamento que §3.3 pede.
 
 ## 8. Em aberto
 
-- Confirmar no sandbox real (credenciais de teste criadas pelo MCP Server do Mercado
-  Pago) os nomes dos campos de expiração da preferência e o manifesto da assinatura do
-  webhook — os links da documentação mudaram e não puderam ser conferidos durante a
-  implementação.
+- **Webhook:** conferir o manifesto da assinatura (`x-signature`) com uma notificação real.
+  Depende de uma URL pública para o Billing (§4, opção B), o que só existe na etapa de nuvem.
+  Até lá, a consulta periódica garante a confirmação.
+- **Estorno real:** depende de ativar as credenciais de produção da conta de teste vendedora.
+  Decisão: não ativar nesta fase. O caminho de estorno é o mesmo código com o provedor
+  simulado (testes, BDD e `scripts/fluxo-completo.py --cenario estorno`), e a recusa do
+  Mercado Pago demonstra o tratamento de falha (`FALHA` + alerta + reprocessamento manual
+  em `POST /admin/sagas/{osId}/reprocessar`).
 - Avaliar se a API de Orders do Mercado Pago substitui a de preferências com vantagem
   para este caso.
