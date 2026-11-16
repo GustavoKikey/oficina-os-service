@@ -10,9 +10,60 @@ Microsserviço de **ordens de serviço** da oficina mecânica (Tech Challenge FI
 histórico da OS, área do cliente (JWT por CPF) e **orquestra a saga** que coordena
 Execução e Billing.
 
-> **Situação:** domínio, saga, testes (unitários, integração, BDD), CI com SonarCloud e implantação na AWS (Terraform próprio e deploy contínuo no EKS) implementados.
+> **Situação:** implementado e validado na AWS em 2026-11-16 — o fluxo completo de uma OS
+> rodou no EKS, passando pelos três serviços, com pagamento real no Mercado Pago (conta de
+> teste) e saga `CONCLUIDA` ([detalhes](#validação-na-aws)).
+>
+> 🎬 **Vídeo de demonstração:** _link adicionado após a gravação_
 
 ---
+
+## Entrega da fase 4 — onde está cada requisito
+
+| Requisito do enunciado | Onde está |
+| --- | --- |
+| **≥ 3 microsserviços**, cada um com repositório, infraestrutura e banco próprios | [OS](https://github.com/GustavoKikey/oficina-os-service), [Execução](https://github.com/GustavoKikey/oficina-execucao-service) e [Billing](https://github.com/GustavoKikey/oficina-billing-service); cada um com o seu `infra/` (Terraform) e o seu banco |
+| **≥ 1 banco SQL e ≥ 1 NoSQL** | PostgreSQL no OS e na Execução (RDS); **DynamoDB** no Billing ([ADR 009](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/adr/adr-009-dynamodb-no-billing.md)) |
+| **REST síncrono** quando necessário + **mensageria assíncrona** | REST nas APIs de cada serviço e na rota interna da Lambda; **RabbitMQ** entre os serviços ([contratos](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/contratos-mensagens.md), [ADR 008](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/adr/adr-008-rabbitmq.md)) |
+| **Nenhum serviço acessa o banco de outro** | Cada serviço só recebe a URL e a senha do próprio banco; a Lambda de login consulta o cliente pela API do OS Service ([ADR 011](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/adr/adr-011-lambda-consulta-os-service.md)) |
+| **Saga com rollback e compensação** em qualquer etapa | Saga **orquestrada** neste serviço — [seção abaixo](#saga-orquestrada-e-por-quê), [saga.md](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/saga.md), [ADR 007](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/adr/adr-007-saga-orquestrada.md) |
+| **Escolha da saga documentada e justificada no README** | [Saga: orquestrada, e por quê](#saga-orquestrada-e-por-quê) |
+| **Testes unitários** em todos os microsserviços | JUnit 5 + Mockito nos três serviços; Vitest na Lambda |
+| **Fluxo completo testado com BDD** | [`ciclo-de-vida-da-os.feature`](src/test/resources/features/ciclo-de-vida-da-os.feature) (Cucumber, em português): do balcão à entrega + as 5 falhas que compensam |
+| **Cobertura ≥ 80% por serviço** | Gate do JaCoCo no build; SonarCloud: **94,7%** (OS), **94,7%** (Execução), **91,6%** (Billing) — [evidências](#qualidade-e-cobertura) |
+| **SonarQube (ou similar) no CI** | SonarCloud com quality gate obrigatório no PR ([painel](https://sonarcloud.io/organizations/gustavokikey/projects)) |
+| **CI/CD independente**: build, testes, qualidade, deploy em Kubernetes | `ci.yml` + `cd.yml` em cada serviço ([CI/CD](#cicd)); o CD só roda depois do CI verde |
+| **Repositórios protegidos** (PR obrigatório e checagens) | `main` protegida nos 5 repositórios: merge só por PR, com 3 checagens obrigatórias |
+| **Mensageria** para a orquestração | RabbitMQ no EKS, provisionado pelo [oficina-infra-k8s](https://github.com/GustavoKikey/oficina-infra-k8s) |
+| **Observabilidade da fase 3** reaproveitada | New Relic: traces distribuídos (OTLP), métricas, logs, painel e alertas da saga — [Observabilidade](#observabilidade) |
+| **Integração com o Mercado Pago** | Billing: Checkout Pro + consulta da API + estorno ([RFC 004](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/rfc/rfc-004-integracao-mercado-pago.md)); validado com pagamento real |
+| **Entregáveis de cada repositório** | Código-fonte · `Dockerfile` · manifestos em `k8s/` · pipelines em `.github/workflows/` · evidência de cobertura (badges e links) · documentação da arquitetura · **Swagger** (`/swagger` e [`docs/openapi.yaml`](docs/openapi.yaml)) |
+
+## Visão geral
+
+```mermaid
+flowchart LR
+    ATD[Atendente / mecânico] --> OS
+    CLI[Cliente] -->|CPF| GW[API Gateway] --> LBD[Lambda<br/>auth por CPF]
+    LBD -->|REST interno| OS
+    CLI -->|JWT| OS
+
+    OS[OS Service<br/>orquestrador da saga] -->|comandos| MQ[(RabbitMQ)]
+    MQ --> EX[Execução Service]
+    MQ --> BI[Billing Service]
+    EX -->|eventos| MQ
+    BI -->|eventos| MQ
+    MQ --> OS
+
+    OS --- DBO[(PostgreSQL<br/>OS)]
+    EX --- DBE[(PostgreSQL<br/>Execução)]
+    BI --- DDB[(DynamoDB<br/>Billing)]
+    BI --> MP[Mercado Pago]
+```
+
+Na AWS, os três serviços e o RabbitMQ rodam no EKS; o desenho completo da implantação está em
+[arquitetura.md](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/arquitetura.md#implantação-na-aws).
+
 
 ## Documentação da arquitetura
 
@@ -111,14 +162,22 @@ docker compose up -d --build
 | http://localhost:15672 | Painel do RabbitMQ (`oficina` / `oficina`) |
 | http://localhost:16686 | Jaeger: traces distribuídos |
 
-**A saga de ponta a ponta:** [`scripts/fluxo-completo.py`](scripts/fluxo-completo.py) percorre,
-contra os três serviços no ar, o fluxo feliz (saga `CONCLUIDA`) e a compensação com estorno
-(reserva de peça vencida, outra OS consome a peça, o pagamento é estornado: saga `COMPENSADA`).
-Precisa de uma validade de reserva curta:
+**A saga de ponta a ponta:** [`scripts/fluxo-completo.py`](scripts/fluxo-completo.py) faz o
+papel do atendente, do mecânico e da cliente contra os três serviços no ar:
+
+| Cenário | O que mostra | Desfecho |
+| --- | --- | --- |
+| `feliz` | Abertura → diagnóstico → orçamento → aprovação → pagamento → reparo → entrega | saga `CONCLUIDA` |
+| `recusa` | Pagamento recusado: a Execução devolve as peças e o Billing cancela o orçamento | saga `COMPENSADA` |
+| `estorno` | Reserva vencida, outra OS consome a peça, o reparo não é liberado e o pagamento é estornado | saga `COMPENSADA` |
 
 ```bash
+# local (o estorno precisa de reserva curta)
 RESERVA_VALIDADE=PT20S docker compose up -d --build
 python scripts/fluxo-completo.py
+
+# na AWS: a cliente entra com o CPF pela Lambda; pagamento real no Mercado Pago (conta de teste)
+python scripts/fluxo-completo.py --nuvem --cenario feliz --mercadopago --pausar
 ```
 
 ## Testes
@@ -152,6 +211,42 @@ resumo de cada execução e o relatório fica nos artefatos (`relatorio-bdd`).
 | [SonarCloud](https://sonarcloud.io/summary/overall?id=GustavoKikey_oficina-os-service) | Quality gate da `main` e de cada PR (badges no topo, atualizados a cada análise). Em 2026-11-16: cobertura **94,7%**, 0 bugs, 0 vulnerabilidades, 0 code smells |
 | [Resumo de cada execução do CI](https://github.com/GustavoKikey/oficina-os-service/actions/workflows/ci.yml) | Tabela de cobertura do JaCoCo (instruções, branches, linhas) e os cenários BDD; relatório completo no artefato `relatorio-jacoco` |
 | Build local | `./mvnw verify` falha abaixo de **80%**; relatório em `target/site/jacoco/index.html` |
+
+## API (Swagger)
+
+Swagger UI em **`/swagger`** de cada serviço (local: http://localhost:8080/swagger; na AWS, pelo
+load balancer público). A especificação OpenAPI exportada do serviço em execução está
+versionada em [`docs/openapi.yaml`](docs/openapi.yaml).
+
+**Autenticação:** funcionários fazem `POST /auth/login` e usam o token no botão *Authorize*;
+clientes recebem o token da Lambda (`POST /auth/cliente` no API Gateway, com o CPF). As rotas
+`/cliente/**` só mostram as OS do próprio cliente.
+
+| Rota | Quem | O quê |
+| --- | --- | --- |
+| `POST /ordens-servico` | Atendente | Abre a OS (cria cliente e veículo se preciso) e inicia a saga |
+| `GET /ordens-servico/{id}` · `/status` · `/historico` | Funcionários | Detalhe, status e histórico de transições |
+| `POST /ordens-servico/{id}/orcamento/aprovar` · `/recusar` | Atendente | Decisão do orçamento no balcão |
+| `POST /ordens-servico/{id}/entregar` | Atendente | Entrega ao cliente (fecha a OS) |
+| `GET /cliente/ordens-servico` · `/{id}/status` | Cliente | As próprias OS, com o link de pagamento |
+| `POST /cliente/ordens-servico/{id}/orcamento/decisao` | Cliente | Aprova ou recusa o próprio orçamento |
+| `GET /admin/sagas/{osId}` · `POST .../reprocessar` | Administrador | Estado da saga, mensagens trocadas e reprocessamento de uma saga em `FALHA` |
+| `GET /relatorios/tempo-medio-execucao` | Administrador | Tempo médio por fase |
+
+A rota interna da Lambda (`GET /internal/clientes`) fica **fora** do Swagger: exige o
+`X-Internal-Token` e só é alcançável pelo load balancer interno, dentro da VPC.
+
+## Observabilidade
+
+A mesma do Tech Challenge da fase 3, o **New Relic**, agora com rastreamento entre serviços:
+
+| Sinal | Como |
+| --- | --- |
+| **Traces distribuídos** | OpenTelemetry → OTLP → New Relic. O outbox guarda o `traceparent` junto com cada mensagem, e a publicação continua o trace original: abrir uma OS, concluir um diagnóstico ou pagar aparecem como **um único trace** atravessando os três serviços e o RabbitMQ |
+| **Métricas de negócio** | Micrometer/Prometheus: OS abertas, sagas concluídas, compensadas (por motivo) e em falha (por passo), duração por fase, falhas de integração |
+| **Logs** | JSON estruturado com `traceId` e `correlationId` (= id da OS), coletados pelo agente do cluster |
+| **Painel e alertas** | "Oficina — Saga (fase 4)" e a policy "Oficina — Saga" (saga em `FALHA`, mensagem na DLQ, pico de compensações, falha de integração), criados como código por [`newrelic-saga.py`](https://github.com/GustavoKikey/oficina-infra-k8s/blob/main/scripts/newrelic-saga.py) |
+| **Local** | Jaeger no docker compose (http://localhost:16686), com o mesmo trace distribuído |
 
 ## Mensageria
 
@@ -197,3 +292,28 @@ vai usar (`scripts/liberar-meu-ip.sh` do oficina-infra-k8s); o Swagger fica em `
 O ambiente inteiro (plataforma, bancos, deploy dos três serviços e Lambda) sobe com
 `scripts/aplicar.sh hom` e cai com `scripts/destruir.sh hom`, no oficina-infra-k8s.
 Decisões e custo: [ADR 012](https://github.com/GustavoKikey/oficina-os-service/blob/main/docs/fase-4/adr/adr-012-implantacao-na-aws.md).
+
+## Validação na AWS
+
+Em **2026-11-16**, o ambiente `hom` subiu inteiro com `scripts/aplicar.sh hom` (EKS 1.37,
+RabbitMQ, dois RDS, DynamoDB, deploy dos três serviços pelo `cd.yml` e a Lambda), e o
+`scripts/fluxo-completo.py --nuvem --cenario feliz --mercadopago` percorreu o fluxo completo:
+
+```
+OS de Alice: f18eb845-6176-46b2-a1bb-01be9bf2e541
+✓ OS chegou à fila da Execução
+  diagnóstico concluído pelo mecânico: 2 peça(s) reservada(s)
+✓ orçamento gerado no Billing → AGUARDANDO_APROVACAO   (R$ 310,00)
+  cliente Alice autenticada pela Lambda (JWT de 30 min)
+  orçamento aprovado pela própria cliente, na área do cliente
+✓ link de pagamento disponível  (Checkout Pro do Mercado Pago)
+✓ o Billing recebeu a resposta do Mercado Pago  (pagamento aprovado, conta de teste)
+✓ pagamento confirmado → Execução baixou as peças → saga EM_REPARO
+✓ Execução comunicou a finalização → FINALIZADA
+  histórico: RECEBIDA → EM_DIAGNOSTICO → AGUARDANDO_APROVACAO → AGUARDANDO_PAGAMENTO → EM_EXECUCAO → FINALIZADA → ENTREGUE
+  saga: CONCLUIDA — 13 mensagens trocadas
+```
+
+A subida também revelou três problemas que só apareciam fora do ambiente local — scripts no
+Git Bash do Windows, um `output` sensível do Terraform e o tempo de publicação da rota do API
+Gateway —, corrigidos por PR em cada repositório.
