@@ -1,12 +1,16 @@
 # =====================================================================
 # CI — Integração Contínua (idêntico nos três serviços)
 # ---------------------------------------------------------------------
-# Roda em todo push fora da main e em todo PR para a main. Três jobs
-# paralelos, todos marcados como checagem obrigatória do PR:
+# Roda em todo PR para a main e na main depois de cada merge (uma execução
+# por commit: com push + PR seriam duas checagens de mesmo nome, e a sem Sonar
+# poderia liberar o merge antes do quality gate). Numa branch sem PR, rode à
+# mão (workflow_dispatch). Três jobs paralelos, todos checagem obrigatória do PR:
 #
 #   1. qualidade ...... build, testes (unitários + integração com
 #                       Testcontainers + BDD), gate de cobertura ≥ 80% sobre
-#                       o serviço inteiro e quality gate do SonarCloud;
+#                       o serviço inteiro e quality gate do SonarCloud
+#                       (só em PR e na main: o plano gratuito do SonarCloud
+#                       não analisa outras branches);
 #   2. imagem ......... garante que o Dockerfile multi-stage builda;
 #   3. manifestos ..... valida k8s/ contra o schema do Kubernetes.
 #
@@ -16,7 +20,7 @@ name: CI
 
 on:
   push:
-    branches-ignore: [main]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -38,6 +42,9 @@ jobs:
     env:
       # 'secrets' não é permitido em 'if:' de step; exposto aqui e testado como env.
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      # O plano gratuito do SonarCloud só analisa a main e os PRs; numa branch, a
+      # análise é aceita mas o quality gate é negado ("non main branches").
+      ANALISAR_NO_SONAR: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout (histórico completo — o Sonar usa para "código novo")
         uses: actions/checkout@v4
@@ -59,7 +66,7 @@ jobs:
         run: ./mvnw -B -ntp verify
 
       - name: SonarCloud (falha o job se o quality gate reprovar)
-        if: env.SONAR_TOKEN != ''
+        if: env.SONAR_TOKEN != '' && env.ANALISAR_NO_SONAR == 'true'
         run: >
           ./mvnw -B -ntp org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
           -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
@@ -69,6 +76,10 @@ jobs:
       - name: SonarCloud não configurado
         if: env.SONAR_TOKEN == ''
         run: echo "::warning::SONAR_TOKEN ausente — análise do SonarCloud pulada."
+
+      - name: SonarCloud fica para o PR
+        if: env.SONAR_TOKEN != '' && env.ANALISAR_NO_SONAR != 'true'
+        run: echo "::notice::Execução manual numa branch — a análise do SonarCloud roda no PR e na main."
 
       # Evidência de cobertura exigida na entrega: aparece no resumo de cada execução.
       - name: Cobertura no resumo do job

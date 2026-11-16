@@ -108,7 +108,7 @@ resumo de cada execução e o relatório fica nos artefatos (`relatorio-bdd`).
 
 | Gatilho | O que roda |
 | --- | --- |
-| Push fora da `main` e PR para a `main` | [`ci.yml`](.github/workflows/ci.yml): build, testes, gate de cobertura, SonarCloud, imagem Docker, kubeconform |
+| PR para a `main` e push na `main` (depois do merge) | [`ci.yml`](.github/workflows/ci.yml): build, testes, gate de cobertura, SonarCloud (o plano gratuito analisa só PRs e a `main`), imagem Docker, kubeconform. Numa branch sem PR: *Run workflow* |
 | `homolog` → `hom`, `main` → `prod` | Deploy no EKS (etapa 5) |
 
 `main` protegida: merge só por Pull Request, com as checagens do CI obrigatórias.
