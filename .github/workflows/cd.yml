@@ -14,6 +14,12 @@
 # sempre vermelha por um motivo que não é defeito de código ensina a
 # ignorar o vermelho (mesmo critério do CD da fase 3). Ambiente no ar e
 # deploy quebrado continua sendo falha.
+#
+# Segurança: este workflow roda com os secrets da AWS. Só o dispara um CI
+# de PUSH na main deste repositório — nunca um CI de pull request, que
+# poderia vir de um fork com uma branch chamada "main" — e o checkout é o
+# da própria main, nunca uma referência vinda do evento. Ações de terceiros
+# fixadas pelo SHA do commit (uma tag pode ser movida).
 # =====================================================================
 name: CD
 
@@ -39,7 +45,9 @@ permissions: {}
 jobs:
   implantar:
     name: Deploy no EKS (${{ inputs.ambiente || 'hom' }})
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -48,23 +56,23 @@ jobs:
     env:
       AWS_REGION: us-east-1
       AMBIENTE: ${{ inputs.ambiente || 'hom' }}
-      COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+      COMMIT: ${{ github.sha }}
+      # O commit que o CI aprovou (vazio no Run workflow).
+      COMMIT_APROVADO: ${{ github.event.workflow_run.head_sha }}
       # Opcionais: sem eles, o pod sobe sem exportar telemetria / com
       # checkout simulado (só o Billing usa o MP_ACCESS_TOKEN).
       NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
       MP_ACCESS_TOKEN: ${{ secrets.MP_ACCESS_TOKEN }}
     steps:
-      # O commit que o CI aprovou, não o que estiver na main agora.
+      # A main deste repositório (github.sha), nunca uma referência do evento.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       # Credenciais temporárias do Learner Lab (4h), reenviadas a cada sessão
       # por scripts/renovar-secrets.sh do oficina-infra-k8s.
       - name: Credenciais AWS
         id: aws
         continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -77,7 +85,11 @@ jobs:
           RESULTADO_CREDENCIAIS: ${{ steps.aws.outcome }}
         run: |
           motivo=""
-          if [ "$RESULTADO_CREDENCIAIS" != success ] || ! aws sts get-caller-identity >/dev/null 2>&1; then
+          if [ -n "$COMMIT_APROVADO" ] && [ "$COMMIT_APROVADO" != "$COMMIT" ]; then
+            # Outro merge chegou à main depois deste CI: o CD daquele commit
+            # (que só roda se o CI dele passar) fará o deploy.
+            motivo="a main avançou para ${COMMIT::7} depois do CI de ${COMMIT_APROVADO::7}"
+          elif [ "$RESULTADO_CREDENCIAIS" != success ] || ! aws sts get-caller-identity >/dev/null 2>&1; then
             motivo="credenciais AWS vencidas (sessão do Learner Lab fechada)"
           elif ! aws ssm get-parameter --name "/oficina/${AMBIENTE}/eks/cluster-name" >/dev/null 2>&1; then
             motivo="ambiente '${AMBIENTE}' não provisionado (sem cluster no SSM)"
@@ -98,7 +110,7 @@ jobs:
       - name: Login no ECR
         id: ecr
         if: steps.ambiente.outputs.disponivel == 'true'
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       # O repositório do ECR pertence ao ciclo de vida da aplicação, não da
       # infraestrutura: nasce aqui e sobrevive à destruição do cluster.
