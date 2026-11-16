@@ -1,0 +1,27 @@
+# Load balancer INTERNO do OS Service — só para a Lambda de autenticação
+# (ADR 011). Sem IP público: só se alcança de dentro da VPC, e a Lambda (que
+# roda na VPC, sem NAT) sai apenas para a porta 80 do CIDR da VPC.
+#
+# O LB expõe o serviço inteiro, mas a rota que interessa, GET
+# /internal/clientes, exige o X-Internal-Token; as demais exigem JWT, como
+# no LB público. scripts/implantar.sh publica o endereço deste LB no SSM
+# (/oficina/{env}/os/url-interna), de onde a Lambda o lê.
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-os-interno
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-os
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: oficina
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: oficina-os
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

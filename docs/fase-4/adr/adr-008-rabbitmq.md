@@ -42,10 +42,16 @@ propagação. Com SQS, essa costura seria manual e frágil.
 
 ## Consequências
 
-- Somos responsáveis pelo RabbitMQ no cluster. Para o escopo, uma réplica com volume
-  persistente basta. Em produção real, seria um cluster de três nós com quorum queues
-  (já usadas aqui, para que a mudança seja só de réplicas).
-- As credenciais do broker são um Secret por serviço, com usuário e permissões
-  (`configure/write/read`) restritos às filas e exchanges que aquele serviço usa.
+- Somos responsáveis pelo RabbitMQ no cluster. Para o escopo, uma réplica basta. Em
+  produção real, seria um cluster de três nós com quorum queues (já usadas aqui, para que
+  a mudança seja só de réplicas).
+- **Na implementação (ADR 012 §5), sem volume persistente:** no Learner Lab, o PVC exigiria
+  o driver EBS CSI com permissão que a role dos nós não garante. O broker usa `emptyDir`; o
+  outbox protege quem publica e a saga reenvia comandos sem resposta.
+- As credenciais do broker são um Secret por serviço, com **um usuário por serviço**
+  (`os-service`, `execucao-service`, `billing-service`), criados por um Job a partir de
+  senhas geradas pelo Terraform da plataforma. Na implementação, cada usuário tem permissão
+  total no vhost: identidades separadas servem para auditar e revogar um serviço sem
+  derrubar os outros; restringir por nome de fila e exchange é o passo seguinte.
 - O painel de gerenciamento **não** é exposto publicamente; é acessado por
   `kubectl port-forward`.
