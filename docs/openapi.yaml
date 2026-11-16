@@ -1,0 +1,1174 @@
+---
+openapi: 3.1.0
+components:
+  securitySchemes:
+    SecurityScheme:
+      description: Authentication
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    BearerAuth:
+      type: http
+      description: "JWT emitido pelo POST /auth/login (cole apenas o token, sem prefixo)."
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    AbrirOrdemServicoRequest:
+      type: object
+      required:
+      - cliente
+      - veiculo
+      properties:
+        cliente:
+          $ref: "#/components/schemas/ClienteInput"
+        veiculo:
+          $ref: "#/components/schemas/VeiculoInput"
+        relatoCliente:
+          type: string
+          description: O que o cliente relatou no balcão — vai para o mecânico na
+            fila de diagnóstico
+          examples:
+          - Barulho na suspensão dianteira ao passar em lombadas
+          maxLength: 500
+    AtualizarClienteRequest:
+      type: object
+      required:
+      - nome
+      properties:
+        nome:
+          type: string
+          description: Nome completo do cliente
+          examples:
+          - João da Silva
+          pattern: \S
+          maxLength: 150
+        email:
+          type: string
+          description: Email do cliente
+          examples:
+          - joao.silva@example.com
+          maxLength: 150
+        telefone:
+          type: string
+          description: Telefone do cliente
+          examples:
+          - "11999999999"
+          maxLength: 30
+    AtualizarVeiculoRequest:
+      type: object
+      required:
+      - marca
+      - modelo
+      properties:
+        marca:
+          type: string
+          description: Marca do veículo
+          examples:
+          - Toyota
+          pattern: \S
+          maxLength: 80
+        modelo:
+          type: string
+          description: Modelo do veículo
+          examples:
+          - Corolla
+          pattern: \S
+          maxLength: 120
+        ano:
+          type: integer
+          format: int32
+          description: Ano de fabricação do veículo
+          examples:
+          - 2020
+          minimum: 1900
+        clienteId:
+          $ref: "#/components/schemas/UUID"
+          description: ID do cliente proprietário (opcional para atualização)
+          type: string
+          examples:
+          - 123e4567-e89b-12d3-a456-426614174000
+    CadastrarClienteRequest:
+      type: object
+      required:
+      - nome
+      - documento
+      properties:
+        nome:
+          type: string
+          description: Nome completo do cliente
+          examples:
+          - João da Silva
+          pattern: \S
+          maxLength: 150
+        documento:
+          type: string
+          description: CPF ou CNPJ do cliente
+          examples:
+          - "12345678900"
+          pattern: \S
+          maxLength: 18
+        email:
+          type: string
+          description: Email do cliente
+          examples:
+          - joao.silva@example.com
+          maxLength: 150
+        telefone:
+          type: string
+          description: Telefone do cliente
+          examples:
+          - "11999999999"
+          maxLength: 30
+    CadastrarUsuarioRequest:
+      type: object
+      required:
+      - username
+      - password
+      - role
+      properties:
+        username:
+          type: string
+          description: Nome de usuário
+          examples:
+          - joao.silva
+          pattern: \S
+          minLength: 3
+          maxLength: 80
+        password:
+          type: string
+          description: Senha do usuário
+          examples:
+          - SenhaForte123!
+          pattern: \S
+          minLength: 8
+          maxLength: 100
+        role:
+          $ref: "#/components/schemas/Role"
+          description: Papel do usuário no sistema
+          type: string
+          examples:
+          - ATENDENTE
+    CadastrarVeiculoRequest:
+      type: object
+      required:
+      - placa
+      - marca
+      - modelo
+      - clienteId
+      properties:
+        placa:
+          type: string
+          description: Placa do veículo
+          examples:
+          - ABC1234
+          pattern: \S
+          maxLength: 10
+        marca:
+          type: string
+          description: Marca do veículo
+          examples:
+          - Toyota
+          pattern: \S
+          maxLength: 80
+        modelo:
+          type: string
+          description: Modelo do veículo
+          examples:
+          - Corolla
+          pattern: \S
+          maxLength: 120
+        ano:
+          type: integer
+          format: int32
+          description: Ano de fabricação do veículo
+          examples:
+          - 2020
+          minimum: 1900
+        clienteId:
+          $ref: "#/components/schemas/UUID"
+          description: ID do cliente proprietário
+          type: string
+          examples:
+          - 123e4567-e89b-12d3-a456-426614174000
+    ClienteInput:
+      type: object
+      required:
+      - documento
+      properties:
+        documento:
+          type: string
+          description: Documento (CPF/CNPJ) do cliente
+          examples:
+          - "52998224725"
+          pattern: \S
+        nome:
+          type: string
+          description: Nome — obrigatório se o cliente ainda não existir
+          examples:
+          - Ana Souza
+        email:
+          type: string
+          description: E-mail para notificações de status da OS
+          examples:
+          - ana@email.com
+        telefone:
+          type: string
+          examples:
+          - "11999990000"
+    ClienteResponse:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        nome:
+          type: string
+        documento:
+          type: string
+        tipoDocumento:
+          type: string
+        email:
+          type: string
+        telefone:
+          type: string
+    DecisaoOrcamentoRequest:
+      type: object
+      required:
+      - aprovado
+      properties:
+        aprovado:
+          type: boolean
+          description: true = orçamento aprovado; false = recusado
+          examples:
+          - true
+    ItemView:
+      type: object
+      properties:
+        tipo:
+          type: string
+        referenciaId:
+          $ref: "#/components/schemas/UUID"
+        descricao:
+          type: string
+        quantidade:
+          type: integer
+          format: int32
+        valorUnitario:
+          type: number
+        subtotal:
+          type: number
+    LoginRequest:
+      type: object
+      required:
+      - username
+      - password
+      properties:
+        username:
+          type: string
+          description: Nome de usuário
+          examples:
+          - joao.silva
+          pattern: \S
+        password:
+          type: string
+          description: Senha do usuário
+          examples:
+          - SenhaForte123!
+          pattern: \S
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        expiresIn:
+          type: integer
+          format: int64
+        role:
+          type: string
+    OffsetDateTime:
+      type: string
+      format: date-time
+      examples:
+      - 2022-03-10T12:15:50-04:00
+    OrcamentoView:
+      type: object
+      properties:
+        orcamentoId:
+          $ref: "#/components/schemas/UUID"
+        valorTotal:
+          type: number
+        geradoEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        aprovadoEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        aprovadoPor:
+          type: string
+    OrdemServicoResponse:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        clienteId:
+          $ref: "#/components/schemas/UUID"
+        veiculoId:
+          $ref: "#/components/schemas/UUID"
+        status:
+          type: string
+        descricaoStatus:
+          type: string
+        relatoCliente:
+          type: string
+        itens:
+          type: array
+          items:
+            $ref: "#/components/schemas/ItemView"
+        orcamento:
+          $ref: "#/components/schemas/OrcamentoView"
+        pagamento:
+          $ref: "#/components/schemas/PagamentoView"
+        motivoCancelamento:
+          type: string
+        criadaEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        diagnosticoIniciadoEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        execucaoIniciadaEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        finalizadaEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        entregueEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        canceladaEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+    PagamentoView:
+      type: object
+      properties:
+        link:
+          type: string
+        expiraEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        confirmadoEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+    Role:
+      type: string
+      enum:
+      - ATENDENTE
+      - MECANICO
+      - ADMINISTRADOR
+    StatusOSResponse:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        status:
+          type: string
+        descricao:
+          type: string
+        atualizadoEm:
+          $ref: "#/components/schemas/OffsetDateTime"
+        linkPagamento:
+          type: string
+    TempoMedioResponse:
+      type: object
+      properties:
+        amostra:
+          type: integer
+          format: int64
+        tempoMedioExecucaoSegundos:
+          type: integer
+          format: int64
+    UUID:
+      type: string
+      format: uuid
+      pattern: "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
+    VeiculoInput:
+      type: object
+      required:
+      - placa
+      properties:
+        placa:
+          type: string
+          description: Placa do veículo
+          examples:
+          - ABC1D23
+          pattern: \S
+        marca:
+          type: string
+          description: Marca — obrigatória se o veículo ainda não existir
+          examples:
+          - VW
+        modelo:
+          type: string
+          description: Modelo — obrigatório se o veículo ainda não existir
+          examples:
+          - Golf
+        ano:
+          type: integer
+          format: int32
+          description: Ano — obrigatório se o veículo ainda não existir
+          examples:
+          - 2020
+    VeiculoResponse:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        placa:
+          type: string
+        marca:
+          type: string
+        modelo:
+          type: string
+        ano:
+          type: integer
+          format: int32
+        clienteId:
+          $ref: "#/components/schemas/UUID"
+tags:
+- name: Autenticação
+  description: Login JWT e cadastro de usuários administrativos
+- name: Clientes
+  description: Cadastro de clientes (PF ou PJ)
+- name: Health
+  description: Verificação de saúde da aplicação
+- name: Ordens de Serviço
+  description: "Abertura, consulta, histórico, decisão do orçamento e entrega"
+- name: Relatórios
+  description: Indicadores de gestão (read models)
+- name: Saga (operação)
+  description: Estado e reprocessamento da saga de cada OS
+- name: Veículos
+  description: Cadastro de veículos vinculados a clientes
+- name: Área do cliente
+  description: Consulta e decisão de orçamento pelo próprio cliente (autenticação
+    por CPF)
+paths:
+  /admin/sagas/{osId}:
+    get:
+      summary: "Estado da saga, prazo, comandos pendentes e mensagens trocadas com\
+        \ os participantes"
+      tags:
+      - Saga (operação)
+      parameters:
+      - name: osId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "404":
+          description: OS não encontrada
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ADMINISTRADOR
+  /admin/sagas/{osId}/reprocessar:
+    post:
+      summary: Reenvia o comando do passo em que uma saga em FALHA parou
+      tags:
+      - Saga (operação)
+      parameters:
+      - name: osId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "409":
+          description: A saga não está em FALHA
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ADMINISTRADOR
+  /auth/login:
+    post:
+      summary: Autentica e devolve JWT
+      tags:
+      - Autenticação
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+        required: true
+      responses:
+        "200":
+          description: Token emitido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Credenciais inválidas
+        "400":
+          description: Bad Request
+  /auth/usuarios:
+    post:
+      summary: Cadastra um novo usuário administrativo (somente ADMINISTRADOR)
+      tags:
+      - Autenticação
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CadastrarUsuarioRequest"
+        required: true
+      responses:
+        "201":
+          description: Usuário criado
+        "401":
+          description: Não autenticado
+        "403":
+          description: Sem permissão (role insuficiente)
+        "409":
+          description: Username já cadastrado
+        "400":
+          description: Bad Request
+      security:
+      - BearerAuth:
+        - ADMINISTRADOR
+  /cliente/ordens-servico:
+    get:
+      summary: Lista as ordens de serviço do cliente autenticado
+      tags:
+      - Área do cliente
+      responses:
+        "200":
+          description: Lista das OS do cliente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrdemServicoResponse"
+        "401":
+          description: Token ausente ou inválido
+        "403":
+          description: Token sem a role CLIENTE
+      security:
+      - BearerAuth:
+        - CLIENTE
+  /cliente/ordens-servico/{id}:
+    get:
+      summary: Detalha uma OS do próprio cliente
+      tags:
+      - Área do cliente
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "200":
+          description: OS encontrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrdemServicoResponse"
+        "403":
+          description: A OS pertence a outro cliente
+        "404":
+          description: OS não encontrada
+        "401":
+          description: Not Authorized
+      security:
+      - BearerAuth:
+        - CLIENTE
+  /cliente/ordens-servico/{id}/orcamento/decisao:
+    post:
+      summary: Aprova ou recusa o orçamento da própria OS
+      description: "Aprovar gera a cobrança no Mercado Pago: o link aparece em linkPagamento\
+        \ da consulta de status assim que o Billing o criar."
+      tags:
+      - Área do cliente
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisaoOrcamentoRequest"
+        required: true
+      responses:
+        "200":
+          description: Decisão registrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOSResponse"
+        "403":
+          description: A OS pertence a outro cliente
+        "404":
+          description: OS não encontrada
+        "409":
+          description: Orçamento não está aguardando aprovação
+        "401":
+          description: Not Authorized
+        "400":
+          description: Bad Request
+      security:
+      - BearerAuth:
+        - CLIENTE
+  /cliente/ordens-servico/{id}/status:
+    get:
+      summary: Consulta o status de uma OS do próprio cliente
+      tags:
+      - Área do cliente
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "200":
+          description: Status atual
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOSResponse"
+        "403":
+          description: A OS pertence a outro cliente
+        "404":
+          description: OS não encontrada
+        "401":
+          description: Not Authorized
+      security:
+      - BearerAuth:
+        - CLIENTE
+  /clientes:
+    get:
+      summary: Lista todos os clientes
+      tags:
+      - Clientes
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClienteResponse"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+    post:
+      summary: Cadastra um novo cliente
+      tags:
+      - Clientes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CadastrarClienteRequest"
+        required: true
+      responses:
+        "201":
+          description: Cliente criado
+        "400":
+          description: Documento ou payload inválido
+        "409":
+          description: Documento já cadastrado
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+  /clientes/{id}:
+    delete:
+      summary: Remove um cliente
+      tags:
+      - Clientes
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "204":
+          description: Removido
+        "404":
+          description: Cliente não encontrado
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+    get:
+      summary: Busca um cliente pelo ID
+      tags:
+      - Clientes
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "404":
+          description: Cliente não encontrado
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+    put:
+      summary: Atualiza nome/contato de um cliente
+      tags:
+      - Clientes
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarClienteRequest"
+        required: true
+      responses:
+        "404":
+          description: Cliente não encontrado
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "400":
+          description: Bad Request
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+  /health:
+    get:
+      summary: Status da aplicação
+      description: "Retorna {\"status\":\"UP\"} quando a aplicação está no ar."
+      tags:
+      - Health
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+  /ordens-servico:
+    get:
+      summary: "Lista OS com filtros opcionais (sem filtro de status: só as em andamento,\
+        \ por prioridade)"
+      tags:
+      - Ordens de Serviço
+      parameters:
+      - name: clienteId
+        in: query
+        schema:
+          $ref: "#/components/schemas/UUID"
+      - name: status
+        in: query
+        schema:
+          type: string
+      - name: veiculoId
+        in: query
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrdemServicoResponse"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+    post:
+      summary: Abre a OS e inicia a saga (cliente e veículo novos são cadastrados)
+      description: A OS nasce RECEBIDA e é enviada à fila de diagnóstico do Execução
+        Service.
+      tags:
+      - Ordens de Serviço
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AbrirOrdemServicoRequest"
+        required: true
+      responses:
+        "201":
+          description: OS criada (status RECEBIDA)
+        "400":
+          description: Documento ou placa inválidos
+        "404":
+          description: Cliente ou veículo inexistente sem dados para cadastrar
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+  /ordens-servico/{id}:
+    get:
+      summary: "Detalhe da OS: itens do diagnóstico, resumo do orçamento, pagamento\
+        \ e datas"
+      tags:
+      - Ordens de Serviço
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "404":
+          description: OS não encontrada
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+  /ordens-servico/{id}/entregar:
+    post:
+      summary: Entrega o veículo (FINALIZADA → ENTREGUE)
+      tags:
+      - Ordens de Serviço
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "409":
+          description: OS não está finalizada
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+  /ordens-servico/{id}/historico:
+    get:
+      summary: "Histórico de status da OS, do mais antigo ao mais recente"
+      tags:
+      - Ordens de Serviço
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "404":
+          description: OS não encontrada
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+  /ordens-servico/{id}/orcamento/aprovar:
+    post:
+      summary: Aprova o orçamento em nome do cliente — dispara a cobrança no Billing
+      tags:
+      - Ordens de Serviço
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "409":
+          description: Orçamento não está aguardando aprovação
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+  /ordens-servico/{id}/orcamento/recusar:
+    post:
+      summary: "Recusa o orçamento — cancela a OS e dispara as compensações (libera\
+        \ peças, cancela orçamento)"
+      tags:
+      - Ordens de Serviço
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "409":
+          description: Orçamento não está aguardando aprovação
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+  /ordens-servico/{id}/status:
+    get:
+      summary: Status atual com descrição amigável
+      tags:
+      - Ordens de Serviço
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "404":
+          description: OS não encontrada
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+  /relatorios/tempo-medio-execucao:
+    get:
+      summary: Tempo médio de execução das OS (em segundos)
+      tags:
+      - Relatórios
+      parameters:
+      - name: ate
+        in: query
+        schema:
+          type: string
+      - name: desde
+        in: query
+        schema:
+          type: string
+      responses:
+        "200":
+          description: Indicador calculado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TempoMedioResponse"
+        "401":
+          description: Não autenticado
+        "403":
+          description: Sem permissão
+      security:
+      - BearerAuth:
+        - ADMINISTRADOR
+  /veiculos:
+    get:
+      summary: Lista todos os veículos
+      tags:
+      - Veículos
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VeiculoResponse"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+    post:
+      summary: Cadastra um novo veículo
+      tags:
+      - Veículos
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CadastrarVeiculoRequest"
+        required: true
+      responses:
+        "201":
+          description: Veículo criado
+        "400":
+          description: Placa ou payload inválido
+        "404":
+          description: Cliente não encontrado
+        "409":
+          description: Placa já cadastrada
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+  /veiculos/cliente/{clienteId}:
+    get:
+      summary: Lista veículos de um cliente
+      tags:
+      - Veículos
+      parameters:
+      - name: clienteId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VeiculoResponse"
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+  /veiculos/{id}:
+    delete:
+      summary: Remove um veículo
+      tags:
+      - Veículos
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "204":
+          description: Removido
+        "404":
+          description: Veículo não encontrado
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+    get:
+      summary: Busca um veículo pelo ID
+      tags:
+      - Veículos
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      responses:
+        "404":
+          description: Veículo não encontrado
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - MECANICO
+        - ADMINISTRADOR
+    put:
+      summary: Atualiza ficha técnica e/ou dono do veículo
+      tags:
+      - Veículos
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/UUID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarVeiculoRequest"
+        required: true
+      responses:
+        "404":
+          description: Veículo ou cliente não encontrado
+        "401":
+          description: Not Authorized
+        "403":
+          description: Not Allowed
+        "400":
+          description: Bad Request
+      security:
+      - BearerAuth:
+        - ATENDENTE
+        - ADMINISTRADOR
+info:
+  title: Oficina — OS Service
+  version: 1.0.0
+  description: "Clientes, veículos, ordens de serviço e orquestração da saga (fase\
+    \ 4)."
