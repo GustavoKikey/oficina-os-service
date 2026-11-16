@@ -156,12 +156,24 @@ compradora, e o fluxo inteiro rodou sem nenhum ajuste no código:
 - a consulta periódica (`/v1/payments/search?external_reference=…`) achou o pagamento
   `approved`/`accredited` em até 15 s, e a saga seguiu até `CONCLUIDA`.
 
+No cenário de estorno (dois pagamentos reais, o segundo sem peça para o reparo), cobrança,
+confirmação e recusa do reparo funcionaram, mas o estorno voltou `401 Unauthorized use of
+live credentials`: a conta de teste vendedora não tem as credenciais de produção
+**ativadas** (formulário e termos no painel do Mercado Pago), e o endpoint de estorno exige
+isso. O teste expôs um bug, já corrigido: o erro do Mercado Pago não cabia em
+`sagas.motivo_falha` e a saga não chegava a `FALHA`. Agora ela chega, com o motivo
+*"Estorno falhou no Mercado Pago: … Unauthorized use of live credentials"*, e o alerta de
+dinheiro preso dispara — o comportamento que §3.3 pede.
+
 ## 8. Em aberto
 
 - **Webhook:** conferir o manifesto da assinatura (`x-signature`) com uma notificação real.
   Depende de uma URL pública para o Billing (§4, opção B), o que só existe na etapa de nuvem.
   Até lá, a consulta periódica garante a confirmação.
-- **Estorno real:** o cenário de estorno já roda com o provedor simulado; falta repeti-lo com
-  dois pagamentos reais (`scripts/fluxo-completo.py --mercadopago --cenario estorno`).
+- **Estorno real:** depende de ativar as credenciais de produção da conta de teste vendedora.
+  Decisão: não ativar nesta fase. O caminho de estorno é o mesmo código com o provedor
+  simulado (testes, BDD e `scripts/fluxo-completo.py --cenario estorno`), e a recusa do
+  Mercado Pago demonstra o tratamento de falha (`FALHA` + alerta + reprocessamento manual
+  em `POST /admin/sagas/{osId}/reprocessar`).
 - Avaliar se a API de Orders do Mercado Pago substitui a de preferências com vantagem
   para este caso.
