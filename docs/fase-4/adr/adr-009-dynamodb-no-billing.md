@@ -66,8 +66,13 @@ do [ADR 010](adr-010-outbox-e-consumidor-idempotente.md), na versão DynamoDB.
 - O código de persistência do Billing é diferente do dos outros serviços (SDK do
   DynamoDB, não Panache). A Clean Architecture isola isso no gateway; domínio e use
   cases não sabem qual é o banco.
-- No Learner Lab não é possível criar IAM role para o pod (IRSA), então o acesso vem
-  da role do nó (`LabRole`). Em produção real, seria IRSA com política restrita à tabela.
+- No Learner Lab não é possível criar IAM role para o pod (IRSA), e a role dos nós não
+  garante permissão no DynamoDB. O deploy injeta a credencial temporária da sessão do lab
+  num Secret do Billing (ADR 012 §4). Em produção real, seria IRSA com política restrita à
+  tabela.
+- A tabela é criada pelo Terraform do próprio Billing (`infra/main.tf`), idêntica à que o
+  `TabelaBilling.java` cria no DynamoDB Local — inclusive o `GSI1SK`, que este ADR não
+  listava.
 - Consultas analíticas sobre pagamentos (faturamento do mês, por exemplo) não cabem
   nesse modelo. Se surgirem, o caminho é exportar para um banco analítico, não forçar o
   DynamoDB.

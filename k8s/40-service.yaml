@@ -1,6 +1,6 @@
-# Service interno do OS Service. A exposição para fora do cluster (load
-# balancer, API Gateway, rota do webhook do Mercado Pago) é decidida na
-# etapa de nuvem — ver docs/fase-4/arquitetura.md §11 e RFC 004.
+# Service do OS Service dentro do cluster (smoke test do deploy, port-forward).
+# Fora do cluster: 45-service-publico.yaml (balcão e área do cliente, restrito
+# por IP) e 46-service-interno.yaml (só a VPC, para a Lambda — ADR 011).
 apiVersion: v1
 kind: Service
 metadata:

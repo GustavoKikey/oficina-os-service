@@ -29,9 +29,9 @@ GET /internal/clientes?documento=52998224725
 
 | Aspecto | Como |
 | --- | --- |
-| Rede | A Lambda **já roda dentro da VPC** (`vpc_config` em `infra/main.tf`, para alcançar o RDS). O OS Service ganha um Service `LoadBalancer` **interno** (`aws-load-balancer-internal: "true"`) só para `/internal/*`. Não há NAT nem custo novo |
+| Rede | A Lambda **já roda dentro da VPC** (`vpc_config` em `infra/main.tf`). O OS Service ganha um Service `LoadBalancer` **interno** (`aws-load-balancer-internal: "true"`, `k8s/46-service-interno.yaml`). O security group da Lambda troca a saída 5432 (banco) pela 80 dentro do CIDR da VPC. Não há NAT |
 | Autenticação | Header `X-Internal-Token` com segredo compartilhado (SSM → env da Lambda e Secret no cluster). Defesa em profundidade: a rota já é inalcançável de fora da VPC |
-| Exposição | `/internal/*` é bloqueado no Service público e fica fora do Swagger público |
+| Exposição | A rota fica fora do Swagger. Um Service do Kubernetes não filtra caminho: o LB público também a serve, mas ele é restrito por IP e a rota exige o token — bloquear o caminho no LB pediria um Ingress, sem ganho real aqui |
 | Contrato | Mesmos campos que a Lambda lia da tabela (`id`, `nome`, `ativo`), então a regra de emissão do token não muda |
 
 A Lambda perde a credencial do banco e o driver `pg`.

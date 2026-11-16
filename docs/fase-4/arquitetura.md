@@ -30,14 +30,14 @@ três coisas que um monolito não entrega:
 
 | Requisito da fase 4 | Onde está |
 | --- | --- |
-| ≥ 3 microsserviços, cada um com repo, infra e banco | §3 e [ADR 006](adr/adr-006-divisao-em-microsservicos.md) |
+| ≥ 3 microsserviços, cada um com repo, infra e banco | §3, [ADR 006](adr/adr-006-divisao-em-microsservicos.md) e `infra/` de cada repo ([ADR 012](adr/adr-012-implantacao-na-aws.md)) |
 | Pelo menos um banco SQL e um NoSQL | §5: PostgreSQL (OS, Execução) e DynamoDB (Billing), [ADR 009](adr/adr-009-dynamodb-no-billing.md) |
 | REST síncrono quando necessário + mensageria assíncrona | §4 e [ADR 008](adr/adr-008-rabbitmq.md) |
 | Nenhum serviço acessa o banco de outro | §5 e [ADR 011](adr/adr-011-lambda-consulta-os-service.md) (a Lambda também deixa de acessar) |
 | Saga com rollback e compensação; escolha documentada | [saga.md](saga.md) e [ADR 007](adr/adr-007-saga-orquestrada.md) |
 | Integração com Mercado Pago | [RFC 004](rfc/rfc-004-integracao-mercado-pago.md) |
 | Testes unitários, BDD em um fluxo completo, ≥ 80% por serviço, Sonar no CI | §8 |
-| CI/CD independente com deploy em Kubernetes; `main` protegida | §9 |
+| CI/CD independente com deploy em Kubernetes; `main` protegida | §9 e [ADR 012](adr/adr-012-implantacao-na-aws.md) |
 | Observabilidade da fase 3 reaproveitada, com rastreamento distribuído | §7 |
 | Contratos de comunicação | [contratos-mensagens.md](contratos-mensagens.md) |
 
@@ -207,16 +207,62 @@ O que a fase 4 acrescenta:
 
 | Repositório | Conteúdo | Situação |
 | --- | --- | --- |
-| `oficina-os-service` | App + `k8s/` + `infra/` (RDS) + CI/CD + **esta documentação** | novo |
+| `oficina-os-service` | App + `k8s/` + `infra/` (RDS, chaves do JWT) + CI/CD + **esta documentação** | novo |
 | `oficina-execucao-service` | App + `k8s/` + `infra/` (RDS) + CI/CD | novo |
 | `oficina-billing-service` | App + `k8s/` + `infra/` (DynamoDB) + CI/CD | novo |
-| `oficina-infra-k8s` | EKS + **RabbitMQ** | existente, ampliado |
+| `oficina-infra-k8s` | Rede, EKS, **RabbitMQ** e os scripts de operação do ambiente | existente, ampliado |
 | `oficina-auth-lambda` | Function de CPF, agora chamando o OS Service | existente, ajustado |
 | `tech-challenge-15SOAT`, `oficina-infra-database` | Fases 1–3 | congelados como histórico |
 
-Cada serviço tem **pipeline independente**: build → testes com gate → SonarCloud →
-imagem no ECR → `kubectl apply` no EKS → smoke test. O padrão de branches da fase 3 se
-mantém: PR obrigatório na `main`, `homolog` → `hom` e `main` → `prod`.
+Cada serviço tem **pipeline independente**, em três workflows:
+
+| Workflow | Quando | O quê |
+| --- | --- | --- |
+| `ci.yml` | PR para a `main` e push na `main` | Build, testes (unitários, integração, BDD), gate de cobertura, SonarCloud, imagem Docker, kubeconform |
+| `cd.yml` | CI **verde** num commit da `main` | Imagem no ECR → `scripts/implantar.sh` no EKS (`hom`) → rollout → smoke test. `prod` é promoção manual |
+| `infra.yml` | PR que mexe em `infra/`; aplicar sob comando | fmt, validate e tflint; apply/destroy no Run workflow |
+
+`main` protegida: merge só por PR, com as três checagens do CI obrigatórias.
+
+### Implantação na AWS
+
+```mermaid
+flowchart LR
+    DEV[Atendente / mecânico<br/>cliente] -->|IP liberado| LBO & LBE & LBB
+    CLI[Cliente] -->|POST /auth/cliente| APIGW[API Gateway]
+    APIGW --> LBD[Lambda<br/>auth por CPF]
+
+    subgraph VPC[VPC default · us-east-1]
+        LBD -->|"GET /internal/clientes<br/>X-Internal-Token"| LBI[LB interno]
+        subgraph EKS[EKS · namespace oficina · 3 × t3.medium]
+            OS[OS Service]
+            EX[Execução Service]
+            BI[Billing Service]
+            MQ[(RabbitMQ)]
+            NR[agente New Relic]
+        end
+        LBO[LB público OS] --> OS
+        LBE[LB público Execução] --> EX
+        LBB[LB público Billing] --> BI
+        LBI --> OS
+        OS <-->|AMQP| MQ
+        EX <-->|AMQP| MQ
+        BI <-->|AMQP| MQ
+        OS --> RDSO[(RDS PostgreSQL<br/>oficina_os)]
+        EX --> RDSE[(RDS PostgreSQL<br/>oficina_execucao)]
+    end
+
+    BI --> DDB[(DynamoDB<br/>oficina-billing)]
+    BI -->|Checkout Pro| MP[Mercado Pago]
+    OS & EX & BI -->|OTLP| NRC[New Relic]
+    NR --> NRC
+    SSM[[SSM Parameter Store<br/>Secrets Manager]] -. contrato .- EKS
+    ECR[[ECR]] -. imagens .- EKS
+```
+
+Decisões, exposição, identidade e custo por hora: [ADR 012](adr/adr-012-implantacao-na-aws.md).
+O ambiente sobe com `scripts/aplicar.sh hom` e cai com `scripts/destruir.sh hom`, ambos no
+`oficina-infra-k8s`.
 
 ---
 
@@ -235,7 +281,7 @@ Os três repositórios precisam estar clonados lado a lado na mesma pasta.
 
 | Restrição | Consequência no desenho |
 | --- | --- |
-| AWS Academy Learner Lab: credenciais de 4 h, sem criar IAM role | Pods acessam o DynamoDB pela role do nó (`LabRole`), sem IRSA. O ambiente é efêmero, como na fase 3. |
+| AWS Academy Learner Lab: credenciais de 4 h, sem criar IAM role | Sem IRSA: o Billing recebe a credencial temporária da sessão para o DynamoDB ([ADR 012](adr/adr-012-implantacao-na-aws.md)). Infra aplicada sob comando; deploy pulado com aviso quando a sessão está fechada. O ambiente é efêmero, como na fase 3. |
 | Crédito limitado | RabbitMQ roda no cluster (Amazon MQ seria pago por hora). As instâncias RDS são `db.t3.micro`. |
-| 3 JVMs + RabbitMQ + agente New Relic em nós `t3.medium` | Requests e limits ajustados (~384 Mi por serviço); o node group pode crescer até 3 nós. |
+| 3 JVMs + RabbitMQ + agente New Relic em nós `t3.medium` | 512 Mi por serviço, 512 Mi para o RabbitMQ; 3 nós (até 5 com o HPA). |
 | Load balancer restrito por IP (fase 3) | O webhook do Mercado Pago precisa de uma rota pública. Ver [RFC 004](rfc/rfc-004-integracao-mercado-pago.md). Sem ela, a consulta periódica cobre o fluxo. |

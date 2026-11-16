@@ -1,0 +1,136 @@
+# =====================================================================
+# Infraestrutura do serviço — Terraform de infra/ (idêntico nos três)
+# ---------------------------------------------------------------------
+# PR / push na main que mexem em infra/ -> fmt, validate e tflint.
+#                                          Não toca na nuvem.
+# Run workflow (manual)                  -> apply ou destroy no ambiente
+#                                          escolhido.
+#
+# Sem apply automático: com credenciais do Learner Lab que vencem em 4h,
+# o banco sobe quando alguém vai usar o ambiente (aqui ou pelo
+# scripts/aplicar.sh do oficina-infra-k8s). O que é contínuo é o deploy
+# da aplicação (cd.yml). Ações de terceiros fixadas pelo SHA do commit.
+# =====================================================================
+name: Infra
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/infra.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/infra.yml"]
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: Ambiente
+        type: choice
+        options: [hom, prod]
+        default: hom
+      acao:
+        description: O que fazer
+        type: choice
+        options: [aplicar, destruir]
+        default: aplicar
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  TF_VERSION: "1.9.8"
+  AWS_REGION: us-east-1
+
+defaults:
+  run:
+    working-directory: infra
+
+jobs:
+  validar:
+    name: Terraform — formato, sintaxe e lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Formatação
+        run: terraform fmt -check -recursive -diff
+
+      - name: Inicialização sem backend
+        run: terraform init -backend=false -input=false
+
+      - name: Validação
+        run: terraform validate
+
+      - uses: terraform-linters/setup-tflint@90f302c255ef959cbfb4bd10581afecdb7ece3e6 # v4.1.1
+      - name: tflint
+        run: tflint --recursive
+
+  executar:
+    name: Terraform — ${{ inputs.acao }} (${{ inputs.ambiente }})
+    needs: validar
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: ${{ inputs.ambiente }}
+    # Tudo o que entra nos scripts passa por variável de ambiente, nunca por
+    # ${{ }} dentro de run: (evita injeção de script pelos inputs).
+    env:
+      AMBIENTE: ${{ inputs.ambiente }}
+      ACAO: ${{ inputs.acao }}
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+      TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # Credenciais temporárias do Learner Lab (4h), reenviadas a cada sessão
+      # por scripts/renovar-secrets.sh do oficina-infra-k8s.
+      - name: Credenciais AWS
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # A chave do state carrega o serviço e o ambiente: oficina-os-service
+      # -> os-service/hom/terraform.tfstate. Assim o arquivo é o mesmo nos três.
+      - name: Init
+        run: |
+          modulo="${GITHUB_REPOSITORY#*/oficina-}"
+          terraform init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="dynamodb_table=${TF_LOCK_TABLE}" \
+            -backend-config="key=${modulo}/${AMBIENTE}/terraform.tfstate"
+
+      - name: Apply
+        if: inputs.acao == 'aplicar'
+        run: terraform apply -auto-approve -input=false -var="ambiente=${AMBIENTE}"
+
+      - name: Destroy
+        if: inputs.acao == 'destruir'
+        run: terraform destroy -auto-approve -input=false -var="ambiente=${AMBIENTE}"
+
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo "## Infra — \`${ACAO}\` em \`${AMBIENTE}\`"
+            echo
+            echo '```'
+            terraform output 2>/dev/null || echo "(sem outputs)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

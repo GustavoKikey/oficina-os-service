@@ -1,0 +1,136 @@
+# =====================================================================
+# CD — Deploy contínuo no EKS (idêntico nos três serviços)
+# ---------------------------------------------------------------------
+# Dispara quando o CI termina VERDE num commit da main — build, testes
+# (unitários, integração e BDD), gate de cobertura e quality gate do
+# SonarCloud já passaram. Então: imagem no ECR e scripts/implantar.sh.
+#
+#   CI verde na main      -> ambiente 'hom'
+#   Run workflow (manual) -> 'hom' ou 'prod' (promoção manual)
+#
+# O ambiente do Learner Lab existe só enquanto alguém o está usando, e as
+# credenciais vencem em 4 horas. Com a sessão fechada ou o ambiente
+# desprovisionado, o deploy é PULADO com aviso, não falha: uma pipeline
+# sempre vermelha por um motivo que não é defeito de código ensina a
+# ignorar o vermelho (mesmo critério do CD da fase 3). Ambiente no ar e
+# deploy quebrado continua sendo falha.
+#
+# Segurança: este workflow roda com os secrets da AWS. Só o dispara um CI
+# de PUSH na main deste repositório — nunca um CI de pull request, que
+# poderia vir de um fork com uma branch chamada "main" — e o checkout é o
+# da própria main, nunca uma referência vinda do evento. Ações de terceiros
+# fixadas pelo SHA do commit (uma tag pode ser movida).
+# =====================================================================
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: Ambiente
+        type: choice
+        options: [hom, prod]
+        default: hom
+
+concurrency:
+  group: cd-${{ inputs.ambiente || 'hom' }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  implantar:
+    name: Deploy no EKS (${{ inputs.ambiente || 'hom' }})
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: ${{ inputs.ambiente || 'hom' }}
+    # Tudo o que entra nos scripts passa por variável de ambiente.
+    env:
+      AWS_REGION: us-east-1
+      AMBIENTE: ${{ inputs.ambiente || 'hom' }}
+      COMMIT: ${{ github.sha }}
+      # O commit que o CI aprovou (vazio no Run workflow).
+      COMMIT_APROVADO: ${{ github.event.workflow_run.head_sha }}
+      # Opcionais: sem eles, o pod sobe sem exportar telemetria / com
+      # checkout simulado (só o Billing usa o MP_ACCESS_TOKEN).
+      NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+      MP_ACCESS_TOKEN: ${{ secrets.MP_ACCESS_TOKEN }}
+    steps:
+      # A main deste repositório (github.sha), nunca uma referência do evento.
+      - uses: actions/checkout@v4
+
+      # Credenciais temporárias do Learner Lab (4h), reenviadas a cada sessão
+      # por scripts/renovar-secrets.sh do oficina-infra-k8s.
+      - name: Credenciais AWS
+        id: aws
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: O ambiente está no ar?
+        id: ambiente
+        env:
+          RESULTADO_CREDENCIAIS: ${{ steps.aws.outcome }}
+        run: |
+          motivo=""
+          if [ -n "$COMMIT_APROVADO" ] && [ "$COMMIT_APROVADO" != "$COMMIT" ]; then
+            # Outro merge chegou à main depois deste CI: o CD daquele commit
+            # (que só roda se o CI dele passar) fará o deploy.
+            motivo="a main avançou para ${COMMIT::7} depois do CI de ${COMMIT_APROVADO::7}"
+          elif [ "$RESULTADO_CREDENCIAIS" != success ] || ! aws sts get-caller-identity >/dev/null 2>&1; then
+            motivo="credenciais AWS vencidas (sessão do Learner Lab fechada)"
+          elif ! aws ssm get-parameter --name "/oficina/${AMBIENTE}/eks/cluster-name" >/dev/null 2>&1; then
+            motivo="ambiente '${AMBIENTE}' não provisionado (sem cluster no SSM)"
+          fi
+          if [ -n "$motivo" ]; then
+            echo "disponivel=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Deploy pulado: ${motivo}."
+            {
+              echo "## Deploy pulado — ${motivo}"
+              echo
+              echo "Para subir o ambiente e implantar: \`bash scripts/aplicar.sh ${AMBIENTE}\`"
+              echo "no repositório oficina-infra-k8s, depois *Run workflow* aqui."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "disponivel=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login no ECR
+        id: ecr
+        if: steps.ambiente.outputs.disponivel == 'true'
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      # O repositório do ECR pertence ao ciclo de vida da aplicação, não da
+      # infraestrutura: nasce aqui e sobrevive à destruição do cluster.
+      - name: Imagem no ECR
+        id: imagem
+        if: steps.ambiente.outputs.disponivel == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          repo="${GITHUB_REPOSITORY#*/}"
+          aws ecr describe-repositories --repository-names "$repo" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "$repo" \
+                 --image-scanning-configuration scanOnPush=true >/dev/null
+          imagem="${REGISTRY}/${repo}:${COMMIT::7}"
+          docker build -t "$imagem" .
+          docker push "$imagem"
+          echo "imagem=$imagem" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy (scripts/implantar.sh)
+        if: steps.ambiente.outputs.disponivel == 'true'
+        env:
+          IMAGEM: ${{ steps.imagem.outputs.imagem }}
+        run: bash scripts/implantar.sh "$AMBIENTE" "$IMAGEM"
