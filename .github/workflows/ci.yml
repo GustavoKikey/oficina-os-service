@@ -21,9 +21,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pull-requests: read
+# Menor privilégio: nada no nível do workflow; cada job pede só o que usa.
+permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -33,6 +32,9 @@ jobs:
   qualidade:
     name: Build, testes, cobertura e SonarCloud
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     env:
       # 'secrets' não é permitido em 'if:' de step; exposto aqui e testado como env.
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -130,6 +132,8 @@ jobs:
   imagem:
     name: Build da imagem Docker
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: docker build (valida o Dockerfile multi-stage)
@@ -138,6 +142,8 @@ jobs:
   manifestos:
     name: Validação dos manifestos Kubernetes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: kubeconform (k8s/ contra o schema oficial)
